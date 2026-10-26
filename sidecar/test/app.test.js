@@ -33,6 +33,11 @@ before(async () => {
       return res.end(`#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg-${token}-1.ts?t=${token}\n`);
     }
     if (u.pathname.startsWith('/seg-')) {
+      const r = (req.headers.range || '').match(/^bytes=(\d+)-(\d+)$/);
+      if (r) {
+        res.writeHead(206, { 'content-type': 'video/mp2t', 'content-range': `bytes ${r[1]}-${r[2]}/6`, 'accept-ranges': 'bytes' });
+        return res.end('TSDATA'.slice(Number(r[1]), Number(r[2]) + 1));
+      }
       res.writeHead(200, { 'content-type': 'video/mp2t' });
       return res.end('TSDATA');
     }
@@ -83,12 +88,12 @@ test('stream: master reduced to one variant behind stable URLs, segments proxied
   const master = await (await fetch(`${sideUrl}/stream/test.m3u8`)).text();
   assert.match(master, /RESOLUTION=1280x720/);
   assert.doesNotMatch(master, /640x360/);
-  assert.match(master, /^\/hls\/test\/v\.m3u8$/m);
+  assert.match(master, /^\.\.\/hls\/test\/v\.m3u8$/m);
 
   const media = await (await fetch(`${sideUrl}/hls/test/v.m3u8`)).text();
-  const seg = media.split('\n').find(l => l.startsWith('/hls/test/s/'));
+  const seg = media.split('\n').find(l => l.startsWith('s/'));
   assert.ok(seg, media);
-  const segRes = await fetch(`${sideUrl}${seg}`);
+  const segRes = await fetch(`${sideUrl}/hls/test/${seg}`);
   assert.equal(segRes.status, 200);
   assert.equal(await segRes.text(), 'TSDATA');
   assert.ok(seenHeaders.every(h => h.referer === 'https://station.example/live'));
@@ -98,7 +103,7 @@ test('expired token: the variant URL stays the same and the stream is re-resolve
   const before = resolveCount;
   token = 'rotated'; // old signed URLs now get 403
   const media = await (await fetch(`${sideUrl}/hls/test/v.m3u8`)).text();
-  assert.match(Buffer.from(media.match(/\/s\/[^/]+\/([^.]+)\./)[1], 'base64url').toString(), /seg-rotated-1\.ts/);
+  assert.match(Buffer.from(media.match(/(?:^|\/)s\/[^/]+\/([^.]+)\./m)[1], 'base64url').toString(), /seg-rotated-1\.ts/);
   assert.equal(resolveCount, before + 1);
 });
 
@@ -167,4 +172,100 @@ test('priority semaphore runs local-sports work first', async () => {
   release();
   await Promise.all([blocker, ...jobs]);
   assert.deepEqual(order, ['game', 'news-1', 'news-2']);
+});
+
+test('segment proxy passes Range through for byte-range playlists', async () => {
+  const media = await (await fetch(`${sideUrl}/hls/test/v.m3u8`)).text();
+  const seg = media.split('\n').find(l => l.startsWith('s/'));
+  const res = await fetch(`${sideUrl}/hls/test/${seg}`, { headers: { range: 'bytes=0-1' } });
+  assert.equal(res.status, 206);
+  assert.equal(res.headers.get('content-range'), 'bytes 0-1/6');
+  assert.equal(await res.text(), 'TS');
+});
+
+test('defaults endpoint returns the bundled market', async () => {
+  const res = await fetch(`${sideUrl}/api/stations/defaults`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.market, 'test');
+  assert.deepEqual(body.stations.map(s => s.id), ['test', 'off']);
+});
+
+test('cache: a resolution invalidated mid-flight is not stored', async () => {
+  let finish;
+  const cache = new ResolutionCache({ resolve: () => new Promise(r => { finish = r; }) });
+  const p = cache.get({ id: 'a' });
+  await new Promise(r => setImmediate(r));
+  cache.invalidate('a'); // the station was edited while its old page was resolving
+  finish({ url: 'https://old.example/a.m3u8', type: 'hls' });
+  await p;
+  assert.equal(cache.peek('a'), null);
+  assert.equal(cache.status('a').state, 'idle');
+});
+
+test('cache: the previous resolution stays usable while a refresh runs', async () => {
+  let n = 0;
+  const finishers = [];
+  const cache = new ResolutionCache({ resolve: () => new Promise(r => { n++; finishers.push(r); }) });
+  const first = cache.get({ id: 'a' });
+  await new Promise(r => setImmediate(r));
+  finishers[0]({ url: 'https://cdn.example/1.m3u8', type: 'hls' });
+  await first;
+  const refresh = cache.get({ id: 'a' }, { force: true });
+  await new Promise(r => setImmediate(r));
+  assert.equal(cache.peek('a')?.url, 'https://cdn.example/1.m3u8');
+  finishers[1]({ url: 'https://cdn.example/2.m3u8', type: 'hls' });
+  await refresh;
+  assert.equal(cache.peek('a')?.url, 'https://cdn.example/2.m3u8');
+  assert.equal(n, 2);
+});
+
+test('playlist links are relative, so a path prefix in front of the sidecar keeps working', async () => {
+  // Resolve each link against the URL a client behind a /tv prefix would have used.
+  const base = 'https://proxy.example/tv/stream/test.m3u8';
+  const master = await (await fetch(`${sideUrl}/stream/test.m3u8`)).text();
+  const variant = new URL(master.split('\n').find(l => l && !l.startsWith('#')), base);
+  assert.equal(variant.href, 'https://proxy.example/tv/hls/test/v.m3u8');
+  const media = await (await fetch(`${sideUrl}/hls/test/v.m3u8`)).text();
+  const seg = new URL(media.split('\n').find(l => l && !l.startsWith('#')), variant);
+  assert.match(seg.pathname, /^\/tv\/hls\/test\/s\/[\w-]+\/[\w-]+\.ts$/);
+  // The same segment path, without the prefix, is what the sidecar serves.
+  assert.equal((await fetch(sideUrl + seg.pathname.slice(3))).status, 200);
+});
+
+test('cache: a due refresh runs in the background while the previous stream keeps playing', async () => {
+  let t = 0;
+  const finishers = [];
+  const cache = new ResolutionCache({ ttlMs: 60_000, now: () => t, resolve: () => new Promise(r => finishers.push(r)) });
+  const first = cache.get({ id: 'a' });
+  await new Promise(r => setImmediate(r));
+  finishers[0]({ url: 'https://cdn.example/1.m3u8', type: 'hls' });
+  await first;
+  t = 61_000; // past the TTL: due for a refresh
+  assert.equal((await cache.get({ id: 'a' })).url, 'https://cdn.example/1.m3u8'); // answered without waiting
+  await new Promise(r => setImmediate(r));
+  assert.equal(finishers.length, 2);
+  assert.equal((await cache.get({ id: 'a' })).url, 'https://cdn.example/1.m3u8'); // still, while it runs
+  finishers[1]({ url: 'https://cdn.example/2.m3u8', type: 'hls' });
+  await new Promise(r => setImmediate(r));
+  assert.equal((await cache.get({ id: 'a' })).url, 'https://cdn.example/2.m3u8');
+});
+
+test('cache: a failed background refresh keeps the playable stream, a forced one waits', async () => {
+  let t = 0;
+  let fail = false;
+  const cache = new ResolutionCache({ ttlMs: 60_000, now: () => t, resolve: async () => {
+    if (fail) throw new Error('page changed');
+    return { url: 'https://cdn.example/1.m3u8', type: 'hls', expiresAt: 10 * 60_000 };
+  } });
+  await cache.get({ id: 'a' });
+  t = 61_000;
+  fail = true;
+  assert.equal((await cache.get({ id: 'a' })).url, 'https://cdn.example/1.m3u8');
+  await new Promise(r => setImmediate(r));
+  assert.equal(cache.peek('a')?.url, 'https://cdn.example/1.m3u8');
+  assert.equal(cache.status('a').refreshError, 'page changed');
+  await assert.rejects(cache.get({ id: 'a' }, { force: true }), /page changed/);
+  t = 10 * 60_000; // the token expired: nothing playable is left
+  assert.equal(cache.peek('a'), null);
 });

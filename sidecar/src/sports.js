@@ -62,9 +62,14 @@ export function parseSchedule(json, team) {
   return out;
 }
 
+// How long a game ESPN says is in progress may run past its estimated end (overtime, extra
+// innings, weather delays). Bounded, so a schedule cached as "in" (ESPN unreachable since) doesn't
+// keep a finished game on the air for good.
+export const OVERRUN_MS = 3 * 3_600_000;
+
 export function isOnAir(event, now) {
   if (event.state === 'post') return false;
-  if (event.state === 'in') return true;
+  if (event.state === 'in') return now >= event.start - LEAD_MS && now < event.end + OVERRUN_MS;
   return now >= event.start - LEAD_MS && now < event.end;
 }
 
@@ -93,18 +98,24 @@ export class SportsSchedule {
     this.log = log;
     this.cache = null; // { at, events }
     this.pending = null;
+    this.generation = 0;
   }
 
+  // A fetch still running for the old teams finishes, but its result is discarded.
   setTeams(teams) {
     this.teams = teams;
     this.cache = null;
+    this.pending = null;
+    this.generation++;
   }
 
   async events() {
     if (this.cache && this.now() - this.cache.at < this.ttlMs) return this.cache.events;
     if (this.pending) return this.pending;
-    this.pending = (async () => {
-      const results = await Promise.all(this.teams.map(async team => {
+    const generation = this.generation;
+    const teams = this.teams;
+    const pending = (async () => {
+      const results = await Promise.all(teams.map(async team => {
         const league = LEAGUES[team.league];
         if (!league) return [];
         const url = `https://site.api.espn.com/apis/site/v2/sports/${league.path}/teams/${encodeURIComponent(team.team)}/schedule`;
@@ -119,10 +130,12 @@ export class SportsSchedule {
         }
       }));
       const events = results.flat();
+      if (generation !== this.generation) return this.events(); // teams changed meanwhile
       this.cache = { at: this.now(), events };
       return events;
-    })().finally(() => { this.pending = null; });
-    return this.pending;
+    })().finally(() => { if (this.pending === pending) this.pending = null; });
+    this.pending = pending;
+    return pending;
   }
 
   // Games within [from, to) on enabled stations, matched to their station.

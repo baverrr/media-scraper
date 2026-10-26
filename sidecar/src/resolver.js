@@ -227,12 +227,15 @@ export class Resolver {
     return false;
   }
 
-  // yt-dlp prints the media URL; for YouTube live that's a muxed HLS playlist.
+  // yt-dlp prints the media URL; for YouTube live that's a muxed HLS playlist. Embed URLs come
+  // from the scanned page, which can replace window.MediaScraper and return anything: only an
+  // http(s) URL is accepted, and `--` ends option parsing so it can't be read as an option.
   async fromYtDlp(url) {
+    if (!/^https?:\/\//i.test(String(url))) return null;
     const { stdout } = await run(this.ytDlp, [
       '-g', '--no-playlist', '--no-warnings',
       '-f', `b[protocol^=m3u8][height<=${this.maxHeight}]/b[protocol^=m3u8]/b`,
-      url,
+      '--', url,
     ], { timeout: 60_000 });
     const manifest = stdout.split(/\r?\n/).find(l => /^https?:/.test(l));
     if (!manifest) return null;

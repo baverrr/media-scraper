@@ -197,3 +197,17 @@ test('watch() reports streams requested before it started', async t => {
   }));
   assert.ok(reported.includes(`${origin}/live.m3u8`), JSON.stringify(reported));
 });
+
+test('markup: streams passed to a player page are unwrapped; lookalike extensions are not streams', async t => {
+  const page = await open(t, `<script>var c = {
+    a: "https://player.example/embed?src=https://cdn.example/live/a.m3u8",
+    b: "https://player.example/embed?autoplay=1&url=https%3A%2F%2Fcdn.example%2Flive%2Fb.m3u8%3Ftoken%3Dx",
+    poster: "https://cdn.example/thumb.m3u8.jpg",
+  }</script>`);
+  if (!page) return;
+  const urls = (await scan(page, { probe: false })).map(i => i.url);
+  assert.ok(urls.includes('https://cdn.example/live/a.m3u8'), JSON.stringify(urls));
+  assert.ok(urls.includes('https://cdn.example/live/b.m3u8?token=x'), JSON.stringify(urls));
+  assert.ok(!urls.some(u => u.startsWith('https://player.example/')), JSON.stringify(urls));
+  assert.ok(!urls.some(u => u.includes('thumb')), JSON.stringify(urls));
+});

@@ -36,7 +36,10 @@ export function semaphore(limit) {
 
 // Resolutions per station: reused until the configured TTL or the URL's own token expiry
 // (whichever is first), shared between concurrent requests, and failures are remembered briefly
-// so a player retrying in a loop doesn't relaunch the browser every second.
+// so a player retrying in a loop doesn't relaunch the browser every second. A due refresh runs in
+// the background while the previous stream keeps being served (until its token really expires),
+// so playback doesn't stall for the browser every TTL; only a forced re-resolve (upstream said the
+// URL expired) makes requests wait.
 export class ResolutionCache {
   constructor({ resolve, ttlMs = 30 * 60_000, failureMs = 60_000, concurrency = 2, now = Date.now }) {
     this.resolveFn = resolve;
@@ -54,30 +57,53 @@ export class ResolutionCache {
     return until;
   }
 
+  // Until when a resolution can still be played: its token's expiry, or without a known expiry
+  // one more TTL past the refresh time (an upstream 401/403 forces a re-resolve before that).
+  usableUntil(value, until) {
+    return value.expiresAt ? value.expiresAt - 15_000 : until + this.ttlMs;
+  }
+
   get(station, { force = false, priority = 1 } = {}) {
     const now = this.now();
     const entry = this.entries.get(station.id);
-    if (entry?.pending) return entry.pending;
+    const stale = !force && entry?.value && entry.usable > now ? entry.value : null;
+    if (entry?.pending) return stale ? Promise.resolve(stale) : entry.pending;
     if (!force && entry && entry.until > now) {
-      return entry.error ? Promise.reject(entry.error) : Promise.resolve(entry.value);
+      return entry.error && !entry.value ? Promise.reject(entry.error) : Promise.resolve(entry.value);
     }
+    // Only store the outcome if this resolution is still the current one: a station edited (and
+    // invalidated) mid-resolve mustn't get the old page's stream cached for the whole TTL.
+    const current = () => this.entries.get(station.id)?.pending === pending;
     const pending = this.limit(() => this.resolveFn(station), priority).then(
       value => {
-        this.entries.set(station.id, { value, until: this.expiryFor(value) });
+        const until = this.expiryFor(value);
+        if (current()) this.entries.set(station.id, { value, until, usable: this.usableUntil(value, until) });
         return value;
       },
       error => {
-        this.entries.set(station.id, { error, until: this.now() + this.failureMs });
+        if (current()) {
+          // A failed background refresh keeps the previous stream while it's still playable.
+          const keep = entry?.value && entry.usable > this.now();
+          this.entries.set(station.id, keep
+            ? { value: entry.value, usable: entry.usable, error, until: this.now() + this.failureMs }
+            : { error, until: this.now() + this.failureMs });
+        }
         throw error;
       },
     );
     this.entries.set(station.id, { ...entry, pending });
+    if (stale) {
+      pending.catch(() => {}); // reported through status(); callers got the previous stream
+      return Promise.resolve(stale);
+    }
     return pending;
   }
 
+  // A usable resolution without waiting, including the previous one while a refresh runs, so
+  // segment requests don't stall for the browser.
   peek(id) {
     const e = this.entries.get(id);
-    return e && !e.pending && !e.error && e.until > this.now() ? e.value : null;
+    return e && e.value && e.usable > this.now() ? e.value : null;
   }
 
   invalidate(id) {
@@ -89,13 +115,14 @@ export class ResolutionCache {
     const e = this.entries.get(id);
     if (!e) return { state: 'idle' };
     if (e.pending) return { state: 'resolving' };
-    if (e.error) return { state: 'failed', error: e.error.message, retryAt: new Date(e.until).toISOString() };
+    if (e.error && !e.value) return { state: 'failed', error: e.error.message, retryAt: new Date(e.until).toISOString() };
     return {
       state: e.until > this.now() ? 'ready' : 'stale',
       via: e.value.via,
       type: e.value.type,
       resolvedAt: e.value.resolvedAt ? new Date(e.value.resolvedAt).toISOString() : null,
       refreshAt: new Date(e.until).toISOString(),
+      ...(e.error ? { refreshError: e.error.message } : {}),
     };
   }
 }
@@ -140,7 +167,9 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
   // Sports channel leads when sports are on.
   async function orderedStations() {
     const { onAir } = await sportsState();
-    const first = onAir.map(g => g.station);
+    // A station airing two games at once (overlapping games on a shared alias, a doubleheader)
+    // is still one channel.
+    const first = [...new Set(onAir.map(g => g.station))];
     const rest = store.enabled().filter(s => !first.includes(s));
     return [...(sportsOn() ? [sportsChannel(store.sports)] : []), ...first, ...rest];
   }
@@ -149,10 +178,11 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
   // instant. Called every minute by the server.
   async function warmSports() {
     const { onAir } = await sportsState();
-    await Promise.all(onAir.map(({ station }) => (cache.peek(station.id)
-      ? null
-      : cache.get(station, { priority: 0 }).catch(() => {}))));
-    return onAir.map(g => g.station.id);
+    // get() answers at once while the resolution is fresh, and refreshes a due one in the
+    // background, so the stream stays current through the game.
+    const stations = [...new Set(onAir.map(g => g.station))];
+    await Promise.all(stations.map(station => cache.get(station, { priority: 0 }).catch(() => {})));
+    return stations.map(s => s.id);
   }
 
   const baseUrl = req => (config.publicUrl || `http://${req.headers.host || `127.0.0.1:${config.port ?? 8899}`}`).replace(/\/$/, '');
@@ -203,9 +233,15 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
     return { text, url: res.url || url };
   }
 
-  // /hls/<station>/s/<signature>/<base64url of the upstream URL>.<ext>: everything in the path,
+  // <station dir>/s/<signature>/<base64url of the upstream URL>.<ext>: everything in the path,
   // ending in a media extension, because ffmpeg rejects segment URLs that don't.
-  const segmentUrl = id => (abs, kind) => `/hls/${encodeURIComponent(id)}/s/${signer.sign(id, abs)}/${Buffer.from(abs).toString('base64url')}.${proxyExtension(abs, kind)}`;
+  const segmentUrl = (id, dir) => (abs, kind) => `${dir}s/${signer.sign(id, abs)}/${Buffer.from(abs).toString('base64url')}.${proxyExtension(abs, kind)}`;
+
+  // Links between the sidecar's playlists are relative to the playlist they're in, so they keep
+  // working behind a reverse proxy that serves the sidecar under a path (PUBLIC_URL with a path).
+  // Station playlists live in /hls/<id>/: the root is /stream/<id>.m3u8, the chosen variant
+  // /hls/<id>/v.m3u8, renditions /hls/<id>/r/<n>.m3u8.
+  const stationDir = (id, which) => (which.kind === 'root' ? `../hls/${id}/` : which.kind === 'rendition' ? '../' : '');
 
   async function servePlaylist(req, res, station, which) {
     const pl = await loadPlaylist(station, which);
@@ -213,10 +249,10 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
       res.writeHead(302, { location: pl.redirect, 'cache-control': 'no-store' });
       return res.end();
     }
-    const id = encodeURIComponent(station.id);
+    const dir = stationDir(encodeURIComponent(station.id), which);
     const body = which.kind === 'root' && isMaster(pl.text)
-      ? rewriteMaster(pl.text, { maxHeight, variantUrl: `/hls/${id}/v.m3u8`, renditionUrl: n => `/hls/${id}/r/${n}.m3u8` })
-      : rewriteMedia(pl.text, pl.url, segmentUrl(station.id));
+      ? rewriteMaster(pl.text, { maxHeight, variantUrl: `${dir}v.m3u8`, renditionUrl: n => `${dir}r/${n}.m3u8` })
+      : rewriteMedia(pl.text, pl.url, segmentUrl(station.id, dir));
     send(res, 200, body, 'application/vnd.apple.mpegurl');
   }
 
@@ -225,12 +261,19 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
     const resolution = cache.peek(station.id) || await cache.get(station, { priority: priorityOf(station) });
     const ctl = new AbortController();
     res.on('close', () => ctl.abort());
-    const up = await fetchImpl(u, { headers: resolution.headers, redirect: 'follow', signal: ctl.signal });
+    // Pass Range through: byte-range playlists (EXT-X-BYTERANGE) cut every segment out of one file.
+    const range = req.headers.range;
+    const up = await fetchImpl(u, { headers: range ? { ...resolution.headers, range } : resolution.headers, redirect: 'follow', signal: ctl.signal });
     const headers = { 'content-type': up.headers.get('content-type') || 'application/octet-stream', 'cache-control': 'no-store' };
-    const len = up.headers.get('content-length');
-    if (len) headers['content-length'] = len;
+    for (const h of ['content-length', 'content-range', 'accept-ranges']) {
+      const v = up.headers.get(h);
+      if (v) headers[h] = v;
+    }
     res.writeHead(up.status, headers);
-    if (!up.body || req.method === 'HEAD') return res.end();
+    if (!up.body || req.method === 'HEAD') {
+      await up.body?.cancel().catch(() => {}); // don't leave the upstream connection open
+      return res.end();
+    }
     await pipeline(Readable.fromWeb(up.body), res).catch(() => {});
   }
 

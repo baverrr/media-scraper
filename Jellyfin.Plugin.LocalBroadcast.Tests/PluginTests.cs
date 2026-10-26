@@ -130,3 +130,56 @@ public class LiveTvRegistrarTests
         Assert.Equal("x", LiveTvRegistrar.FindListings(byUrl, "ours", Guide)?.Id);
     }
 }
+
+public class SidecarClientAuthTests
+{
+    private sealed class Capture : System.Net.Http.HttpMessageHandler
+    {
+        public string? ApiKey { get; private set; }
+
+        protected override System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+        {
+            ApiKey = request.Headers.TryGetValues("X-Api-Key", out var v) ? v.Single() : null;
+            return System.Threading.Tasks.Task.FromResult(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new System.Net.Http.StringContent("[]") });
+        }
+    }
+
+    private sealed class Factory(System.Net.Http.HttpMessageHandler handler) : System.Net.Http.IHttpClientFactory
+    {
+        public System.Net.Http.HttpClient CreateClient(string name) => new(handler, false);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task SendsTheApiKeyTrimmed()
+    {
+        var capture = new Capture();
+        var client = new SidecarClient(new Factory(capture));
+        await client.StatusAsync(new PluginConfiguration { SidecarUrl = "http://sidecar:8899", ApiKey = " secret\n" }, System.Threading.CancellationToken.None);
+        Assert.Equal("secret", capture.ApiKey);
+    }
+
+    [Theory]
+    [InlineData("localhost:8899")]
+    [InlineData("")]
+    [InlineData("ftp://sidecar")]
+    public async System.Threading.Tasks.Task RejectsASidecarUrlThatIsNotAFullHttpAddress(string url)
+    {
+        var client = new SidecarClient(new Factory(new Capture()));
+        var e = await Assert.ThrowsAsync<System.Net.Http.HttpRequestException>(() => client.StatusAsync(new PluginConfiguration { SidecarUrl = url }, System.Threading.CancellationToken.None));
+        Assert.Contains("http://127.0.0.1:8899", e.Message);
+    }
+
+    private sealed class Html : System.Net.Http.HttpMessageHandler
+    {
+        protected override System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+            => System.Threading.Tasks.Task.FromResult(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new System.Net.Http.StringContent("<html>login</html>") });
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task ReportsANonJsonAnswerAsAnHttpError()
+    {
+        var client = new SidecarClient(new Factory(new Html()));
+        var e = await Assert.ThrowsAsync<System.Net.Http.HttpRequestException>(() => client.StatusAsync(new PluginConfiguration { SidecarUrl = "http://wrong:80" }, System.Threading.CancellationToken.None));
+        Assert.Contains("not JSON", e.Message);
+    }
+}
