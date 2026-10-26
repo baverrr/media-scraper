@@ -1,0 +1,34 @@
+# Local Broadcast sidecar. Jellyfin reaches it at http://127.0.0.1:8899 when Jellyfin uses host
+# networking; the port is bound to localhost only, since Jellyfin re-serves the streams itself.
+# Jellyfin in a bridge-network container: put both on one network and use http://local-broadcast:8899.
+#
+#   export LOCAL_BROADCAST_API_KEY=$(openssl rand -hex 24)
+#   docker compose -f sidecar/compose.yaml up -d
+#
+# Or put LOCAL_BROADCAST_API_KEY (and optionally MARKET, TZ) in sidecar/.env. MARKET is one of
+# the files in sidecar/markets/; TZ is the market's time zone (default: the market file's).
+#
+# Put the same key in the Jellyfin plugin's settings.
+services:
+  local-broadcast:
+    image: ghcr.io/baverrr/local-broadcast-sidecar:latest
+    # To build from this checkout instead: docker compose -f sidecar/compose.yaml up -d --build
+    build:
+      context: ..
+      dockerfile: sidecar/Dockerfile
+    container_name: local-broadcast
+    restart: unless-stopped
+    init: true
+    shm_size: 1gb # Chromium needs more than Docker's 64 MB default
+    ports:
+      - "127.0.0.1:8899:8899"
+    environment:
+      API_KEY: ${LOCAL_BROADCAST_API_KEY:?set LOCAL_BROADCAST_API_KEY}
+      MARKET: ${MARKET:-denver} # default stations and teams until the plugin sends its own
+      TZ: ${TZ:-}
+      MAX_HEIGHT: "1080"
+    volumes:
+      - local-broadcast-data:/data
+
+volumes:
+  local-broadcast-data:
