@@ -55,9 +55,12 @@ The sidecar does not get around bot checks, DRM or sign-ins. A disabled station 
 1. **Run the sidecar** next to Jellyfin:
 
    ```bash
-   export LOCAL_BROADCAST_API_KEY=$(openssl rand -hex 24)
+   echo "LOCAL_BROADCAST_API_KEY=$(openssl rand -hex 24)" > sidecar/.env
+   chmod 600 sidecar/.env
    docker compose -f sidecar/compose.yaml up -d
    ```
+
+   Outside Denver, add `MARKET=<market>` (a file name in [`sidecar/markets/`](sidecar/markets/)) to `sidecar/.env`; the browser uses that market's time zone unless you set `TZ`. The image runs on x86-64 and on ARM64 (Raspberry Pi 4/5, ARM servers); on ARM it uses Chromium, since Google Chrome isn't built for ARM Linux, so stations whose players need H.264/AAC may not resolve there.
 
    It listens on `127.0.0.1:8899` (Jellyfin re-serves the streams to your clients, so it needn't be reachable from elsewhere). With Jellyfin in a bridge-network container instead of host networking, put both on one Docker network and use `http://local-broadcast:8899`.
 
@@ -83,6 +86,7 @@ Markets are JSON files in [`sidecar/markets/`](sidecar/markets/): stations (id, 
 | --- | --- | --- |
 | `API_KEY` | none | Required for changes from the plugin (`X-Api-Key`). |
 | `MARKET` | `denver` | Defaults until the plugin sends its own stations and teams. |
+| `TZ` | the market's | Time zone the station pages see (e.g. `America/Chicago`). |
 | `MAX_HEIGHT` | `1080` | Highest quality picked from a station's variants. |
 | `RESOLVE_TTL_MINUTES` | `30` | How long a found stream is reused (shorter when its token expires sooner). |
 | `MAX_CONCURRENT_RESOLVES` | `2` | Browser pages at once; local-sports stations jump the queue. |

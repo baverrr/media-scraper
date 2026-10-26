@@ -1,7 +1,7 @@
 ---
 name: "Local Broadcast"
 guid: "d0766040-c26a-4cc7-9c0b-c7064aa77001"
-version: "1.0.0.0"
+version: "1.0.1.0"
 targetAbi: "12.2.0.0"
 framework: "net10.0"
 overview: "Local TV stations' free web streams in Live TV, local sports first"
@@ -16,5 +16,7 @@ owner: "baverrr"
 artifacts:
 - "Jellyfin.Plugin.LocalBroadcast.dll"
 changelog: >
-  Initial release: Denver market (19 stations, 11 local teams), Live TV tuner
-  and guide set up automatically, Local Sports channel, manual stream URLs.
+  Bug fixes: streams no longer stall at each refresh, a failed Test leaves a
+  playing channel alone, sturdier settings page (clear errors for a wrong
+  sidecar URL or API key), Local Sports guide starts with the pre-game, and
+  better stream detection on station pages.

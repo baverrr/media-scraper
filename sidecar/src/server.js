@@ -46,7 +46,9 @@ const store = new StationStore({ dataDir: config.dataDir, marketsDir: path.join(
 await store.load();
 const sports = new SportsSchedule({ teams: store.sports.teams, log });
 
-const resolver = new Resolver({ scraperPath, ytDlp: config.ytDlp, maxHeight: config.maxHeight, channel: config.browserChannel, log });
+// The browser's time zone: TZ, else the market's (markets/<id>.json "timezone").
+const timezoneId = env.TZ || (await store.marketDefaults().catch(() => null))?.timezone || undefined;
+const resolver = new Resolver({ scraperPath, ytDlp: config.ytDlp, maxHeight: config.maxHeight, channel: config.browserChannel, timezoneId, log });
 const app = createApp({ store, resolver, sports, config, log });
 const resolve = app.cache.resolveFn;
 app.cache.resolveFn = async station => {

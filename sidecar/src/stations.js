@@ -152,7 +152,7 @@ export class StationStore {
   // The configured market's bundled stations and teams, as the sidecar starts with them.
   async defaults() {
     const market = await this.marketDefaults();
-    return { market: market.id, name: market.name, stations: market.stations, sports: market.sports };
+    return { market: market.id, name: market.name, timezone: market.timezone, stations: market.stations, sports: market.sports };
   }
 
   get(id) {
