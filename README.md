@@ -27,24 +27,36 @@ const results = await page.evaluate(() => MediaScraper.scan().then(MediaScraper.
 
 `toJSON` strips the DOM node references so the results serialize cleanly.
 
+### Loading early (recommended for MSE players)
+
+To pair hls.js, dash.js and Shaka players with their manifests, the script has to run before the page creates them. Load it before the page's own scripts:
+
+- **Userscript:** `// @run-at document-start`
+- **Puppeteer:** `await page.evaluateOnNewDocument(fs.readFileSync('media-scraper.js', 'utf8'))`
+- **Playwright:** `await page.addInitScript({ path: 'media-scraper.js' })`
+
+Loaded this way, it hooks each library the moment the library assigns itself to `window`.
+
 ## What it detects
 
 | Source | Details |
 | --- | --- |
 | `<video>` / `<audio>` | Including open shadow DOM and same-origin iframes. Live when `duration === Infinity` or the seekable range extends past the duration. Players fed a MediaStream (`srcObject`: WebRTC, camera, canvas capture) are reported as `mediastream` and always live. |
-| Stream URLs | HLS (`.m3u8`), DASH (`.mpd`), Smooth Streaming, FLV, HDS, RTMP, RTSP, SRT, media WebSockets — from network requests, `<source>` tags, attributes, inline scripts and JSON (handles `\/` and `\uXXXX` escaping). WebSockets in scripts are kept only when they look like media (`.flv`/`.ts`/`.mp4`, or `/live/`, `/stream/`, `/media/` paths). |
+| Stream URLs | HLS (`.m3u8`), DASH (`.mpd`), Smooth Streaming, FLV, HDS, RTMP, RTSP, SRT, media WebSockets — from network requests, `<source>` tags, attributes, inline scripts and JSON (handles `\/` and `\uXXXX` escaping, and relative paths such as `"/live/index.m3u8"`). WebSockets in scripts are kept only when they look like media (`.flv`/`.ts`/`.mp4`, or `/live/`, `/stream/`, `/media/` paths). |
 | Embeds | YouTube, Twitch, Kick, Vimeo, Facebook, Dailymotion, Rumble, Streamable, Wistia, Brightcove, JW Player, Mux, Livestream, IBM Video, Restream, Owncast — with the video/channel ID. |
 | Player libraries | video.js, JW Player, Plyr, Flowplayer, hls.js, dash.js, Shaka Player, Clappr. |
 
 Results are deduplicated by URL; each item lists every method that found it in `foundBy`. HLS variant playlists are folded into their master playlist (listed in its `variants`) rather than reported separately.
 
+Before comparing URLs, parameters that change on every request are dropped: low-latency HLS directives (`_HLS_msn`, `_HLS_part`, …) and cache-busters (`_`, `t`, `ts`, `cb`, `rnd`, …) when their value is a timestamp or random number. A playlist polled once a second is one result, not hundreds. Other parameters, such as signed tokens, are kept exactly as they were.
+
 ### Network capture
 
-As soon as the script loads, it starts a `PerformanceObserver` that records stream requests. Browsers keep only 250 entries in the resource timing buffer, and a live page re-fetches its playlist every few seconds, so `performance.getEntries()` alone stops showing new manifests quickly; the observer keeps receiving them. Same-origin iframes are observed from the first scan that finds them.
+As soon as the script loads, it starts a `PerformanceObserver` that records stream requests. Browsers keep only 250 entries in the resource timing buffer, and a live page re-fetches its playlist every few seconds, so `performance.getEntries()` alone stops showing new manifests quickly; the observer keeps receiving them. It keeps the 500 most recently active streams. Same-origin iframes are observed from the first scan that finds them.
 
 ### Pairing players with manifests
 
-MSE players (hls.js, dash.js, Shaka) play a `blob:` URL, so the `<video>` itself doesn't say what it's playing. When the script loads, it hooks `Hls.prototype`, `shaka.Player.prototype` and the `dashjs.MediaPlayer` factory to capture instances created or loaded from then on. Each MSE element is then linked to its own instance's manifest (`manifest`, `library`) and inherits its live status.
+MSE players (hls.js, dash.js, Shaka) play a `blob:` URL, so the `<video>` itself doesn't say what it's playing. The script hooks `Hls.prototype`, `shaka.Player.prototype` and the `dashjs.MediaPlayer` factory to capture instances created or loaded from then on. If the libraries don't exist yet because the script was [loaded early](#loading-early-recommended-for-mse-players), it hooks each one as soon as it's assigned to `window`. Each MSE element is then linked to its own instance's manifest (`manifest`, `library`) and inherits its live status.
 
 Without a captured instance, the script only guesses when it's unambiguous — one unpaired MSE element and one live manifest — and marks the guess with `manifestGuessed: true`.
 
@@ -76,7 +88,13 @@ Requests go out with cookies first (for token-gated streams), then without (for 
 
 ## Watch mode
 
-`watch()` hooks `fetch`, `XMLHttpRequest`, `WebSocket` and resource timing in the page and in every same-origin iframe, including iframes added or reloaded later. It also observes DOM changes in open shadow roots and iframe documents. Rescans run at most every 500 ms, so a page that changes constantly (live chat) can't hold them off. `unwatch()` restores everything it replaced.
+`watch()` hooks `fetch`, `XMLHttpRequest`, `WebSocket` and resource timing in the page and in every same-origin iframe, including iframes added or reloaded later. It also observes DOM changes in open shadow roots and iframe documents.
+
+- **Manifests without an extension** (`/api/stream/123`) are recognised from the response's content type (`application/vnd.apple.mpegurl`, `application/dash+xml`, …). Only the headers are read, so the page's own use of the response is unaffected. Later `scan()` calls include them too.
+- **WebRTC players started later** are caught through the media `loadstart` event, since setting `srcObject` changes no attribute.
+- **Rescans** run at most every 500 ms, so a page that changes constantly (live chat) can't hold them off. They skip reading every `window` property and only re-read inline scripts whose text changed, so they stay cheap on large pages.
+
+`unwatch()` restores everything it replaced.
 
 ## Limitations
 
@@ -85,3 +103,5 @@ Requests go out with cookies first (for token-gated streams), then without (for 
 - Live probing is subject to CORS; blocked items keep `live: null` and get a `probeError`.
 - `watch()` only sees requests made after it starts, so call it before the player loads.
 - Player instances created before the script loads, or from a library bundled into the site's code instead of exposed as `window.Hls` / `shaka` / `dashjs`, can't be captured, so their MSE elements are paired only when the guess is unambiguous.
+- Manifests without a file extension are recognised only by `watch()`, from requests made after it starts; `scan()` alone can't see response content types.
+- When loaded early, the script briefly defines `Hls`, `shaka` and `dashjs` on `window` (returning `undefined`) until the real libraries arrive, so a page that tests `'Hls' in window` rather than `window.Hls` could misread it.

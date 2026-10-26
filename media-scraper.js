@@ -36,6 +36,21 @@
   const MEDIA_WS_RE = /^wss?:\/\/[^?#]*(?:\.(?:flv|ts|mp4|m4s|h264|mjpe?g)(?:[?#]|$)|\/(?:live|stream|streams|media|video|play)(?:[/?#]|$))/i;
   const HLS_RE = /^\uFEFF?\s*#EXTM3U/;
   const MPD_RE = /<MPD[\s>]/i;
+  // Quoted relative paths to a manifest ("/live/index.m3u8", "../a.mpd", "index.m3u8?x=1").
+  const REL_STREAM_RE = /["'`]((?:\.{1,2}\/|\/(?!\/))?[\w\-.~%/]*\.(?:m3u8|mpd)(?:\?[^\s"'`<>\\]*)?)["'`]/gi;
+  // Response content types that identify a manifest when the URL has no telling extension.
+  const MANIFEST_TYPES = [
+    { re: /mpegurl/i, type: 'hls' },
+    { re: /dash\+xml/i, type: 'dash' },
+    { re: /vnd\.ms-sstr\+xml/i, type: 'smooth' },
+    { re: /x-flv/i, type: 'flv' },
+  ];
+  // Query parameters that change on every request: LL-HLS delivery directives, and cache-busters
+  // when they hold a timestamp or random number (so a `t=` token is left alone).
+  const VOLATILE_PARAM_RE = /^_HLS_/i;
+  const CACHE_BUST_PARAM_RE = /^(?:_|t|ts|time|timestamp|cb|cachebust|cachebuster|nocache|r|rnd|rand|random)$/i;
+  const CACHE_BUST_VALUE_RE = /^(?:\d{6,}|0?\.\d+)$/;
+  const NETWORK_LIMIT = 500;
 
   const EMBEDS = [
     { name: 'YouTube',     re: /youtube(?:-nocookie)?\.com\/embed\/live_stream\?(?:[^#]*&)?channel=([\w-]+)|youtube(?:-nocookie)?\.com\/(?:embed|live)\/([\w-]+)|youtu\.be\/([\w-]+)/i },
@@ -61,16 +76,48 @@
 
   // Player instances captured by hooking library prototypes/factories (see hookLibraries).
   const captured = new Set();
-  // Stream URLs seen by a PerformanceObserver. Unlike performance.getEntries(), an observer keeps
-  // receiving entries after the 250-entry resource timing buffer fills, which live pages do quickly
-  // by re-fetching their playlist every few seconds.
-  const networkSeen = new Set();
+  // Stream requests seen by a PerformanceObserver (or by watch()'s content-type check), keyed by
+  // streamKey(). Unlike performance.getEntries(), an observer keeps receiving entries after the
+  // 250-entry resource timing buffer fills, which live pages do quickly by re-fetching their
+  // playlist every few seconds. Capped at NETWORK_LIMIT, oldest first out.
+  const networkSeen = new Map();
   const observedWindows = new WeakSet();
 
   // ---------- helpers ----------
 
   function abs(url, base) {
     try { return new URL(url, base || location.href).href; } catch { return null; }
+  }
+
+  // The URL minus its fragment and any per-request parameters, so a playlist polled as
+  // `?_HLS_msn=812&_HLS_part=3` or `?_=1730000000000` is one stream, not hundreds. The rest of
+  // the query is kept byte-for-byte, so signed tokens still work when the URL is fetched.
+  function streamKey(url) {
+    if (!url) return url;
+    const noHash = String(url).replace(/#.*$/, '');
+    const q = noHash.indexOf('?');
+    if (q < 0) return noHash;
+    const kept = noHash.slice(q + 1).split('&').filter(pair => {
+      if (!pair) return false;
+      const [k, v = ''] = pair.split('=');
+      let key = k, val = v;
+      try { key = decodeURIComponent(k); val = decodeURIComponent(v); } catch {}
+      return !(VOLATILE_PARAM_RE.test(key) || (CACHE_BUST_PARAM_RE.test(key) && CACHE_BUST_VALUE_RE.test(val)));
+    });
+    return noHash.slice(0, q) + (kept.length ? '?' + kept.join('&') : '');
+  }
+
+  function rememberNetwork(url, type) {
+    const key = streamKey(url);
+    if (!key) return;
+    networkSeen.delete(key); // re-insert so recently active streams survive the cap
+    networkSeen.set(key, { url: key, type: type || typeOf(key) });
+    if (networkSeen.size > NETWORK_LIMIT) networkSeen.delete(networkSeen.keys().next().value);
+  }
+
+  function manifestType(contentType) {
+    const m = contentType && MANIFEST_TYPES.find(t => t.re.test(contentType));
+    return m ? m.type : null;
   }
 
   function typeOf(url) {
@@ -180,12 +227,35 @@
     } catch {}
   }
 
+  // When the script runs before the libraries load (a userscript at document-start, Puppeteer's
+  // evaluateOnNewDocument), hook each library the moment its UMD build assigns it to window.
+  // Only used while the document is still loading: until assigned, `'Hls' in window` is true.
+  function trapLibraries(win) {
+    for (const name of ['Hls', 'shaka', 'dashjs']) {
+      try {
+        if (Object.getOwnPropertyDescriptor(win, name)) continue; // already defined
+        Object.defineProperty(win, name, {
+          configurable: true,
+          enumerable: false,
+          get() { return undefined; },
+          set(value) {
+            // Turn back into a plain property, then hook. Hook again on the next tick too, for
+            // namespaces like `shaka` whose members are filled in after it's assigned.
+            Object.defineProperty(win, name, { value, writable: true, configurable: true, enumerable: true });
+            hookLibraries(win);
+            win.setTimeout(() => hookLibraries(win), 0);
+          },
+        });
+      } catch {}
+    }
+  }
+
   function observeNetwork(win) {
     if (!win || observedWindows.has(win)) return;
     observedWindows.add(win);
     try {
       const po = new win.PerformanceObserver(list => {
-        for (const e of list.getEntries()) if (STREAM_EXT_RE.test(e.name)) networkSeen.add(e.name);
+        for (const e of list.getEntries()) if (STREAM_EXT_RE.test(e.name)) rememberNetwork(e.name);
       });
       po.observe({ type: 'resource', buffered: true });
     } catch {}
@@ -261,43 +331,66 @@
   }
 
   function collectNetwork() {
-    const urls = new Set(networkSeen);
     for (const win of windowsOf()) {
       observeNetwork(win); // start observing same-origin iframes found since the last scan
-      try { for (const e of win.performance.getEntriesByType('resource')) if (STREAM_EXT_RE.test(e.name)) urls.add(e.name); } catch {}
+      try {
+        for (const e of win.performance.getEntriesByType('resource')) {
+          if (STREAM_EXT_RE.test(e.name) && !networkSeen.has(streamKey(e.name))) rememberNetwork(e.name);
+        }
+      } catch {}
     }
-    return [...urls].map(url => ({ kind: 'stream', source: 'network', url, type: typeOf(url), live: null }));
+    return [...networkSeen.values()].map(({ url, type }) => ({ kind: 'stream', source: 'network', url, type, live: null }));
   }
+
+  function streamsInText(text, base) {
+    const urls = [];
+    // Undo JSON/JS escaping (\/ and \uXXXX) so query strings like stream tokens stay intact.
+    const unescaped = text.replace(/\\\//g, '/')
+      .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/&amp;/g, '&');
+    for (const m of unescaped.matchAll(STREAM_RE)) {
+      const url = abs(m[0].startsWith('//') ? location.protocol + m[0] : m[0], base);
+      // Scripts are full of chat/analytics sockets; keep only ones that look like media.
+      if (url && /^wss?:/i.test(url) && !MEDIA_WS_RE.test(url)) continue;
+      if (url) urls.push(url);
+    }
+    for (const m of unescaped.matchAll(REL_STREAM_RE)) {
+      const url = abs(m[1], base);
+      if (url) urls.push(url);
+    }
+    return urls;
+  }
+
+  // Inline scripts can be megabytes of JSON; remember what each one contained so watch()'s
+  // frequent rescans only re-read scripts whose text changed.
+  const scriptCache = new WeakMap();
 
   function collectFromMarkup() {
     const out = [];
-    const texts = [];
+    const add = url => out.push({ kind: 'stream', source: 'markup', url, type: typeOf(url), live: null });
     for (const r of roots()) {
+      const base = (r.ownerDocument || r).baseURI;
       for (const s of r.querySelectorAll('script:not([src]), script[type="application/json"], script[type="application/ld+json"]')) {
-        texts.push(s.textContent);
+        const text = s.textContent;
+        let cached = scriptCache.get(s);
+        if (!cached || cached.text !== text) {
+          cached = { text, urls: streamsInText(text, base) };
+          scriptCache.set(s, cached);
+        }
+        cached.urls.forEach(add);
       }
       for (const el of r.querySelectorAll('*')) {
         for (const a of el.attributes) {
-          if (a.value.length > 8 && /m3u8|mpd|rtmp|\.flv|manifest/i.test(a.value)) texts.push(a.value);
+          // Quote the value so a bare relative path (data-src="/live/index.m3u8") matches too.
+          if (a.value.length > 8 && /m3u8|mpd|rtmp|\.flv|manifest/i.test(a.value)) streamsInText(`"${a.value}"`, base).forEach(add);
         }
-      }
-    }
-    for (const t of texts) {
-      // Undo JSON/JS escaping (\/, \u0026, ...) so query strings like stream tokens stay intact.
-      const unescaped = t.replace(/\\\//g, '/')
-        .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
-        .replace(/&amp;/g, '&');
-      for (const m of unescaped.matchAll(STREAM_RE)) {
-        const url = abs(m[0].startsWith('//') ? location.protocol + m[0] : m[0]);
-        // Scripts are full of chat/analytics sockets; keep only ones that look like media.
-        if (url && /^wss?:/i.test(url) && !MEDIA_WS_RE.test(url)) continue;
-        if (url) out.push({ kind: 'stream', source: 'markup', url, type: typeOf(url), live: null });
       }
     }
     return out;
   }
 
-  function collectLibraries() {
+  // quick: skip reading every window property (watch() rescans); captured instances still count.
+  function collectLibraries(quick = false) {
     const out = [];
     const w = global;
     // `media` is the <video>/<audio> the player drives; scan() uses it to pair MSE elements with
@@ -350,7 +443,7 @@
     const looksShaka = o => o && typeof o === 'object' && typeof o.getAssetUri === 'function' && typeof o.isLive === 'function';
     const looksClappr = o => o && typeof o === 'object' && o.options && typeof o.getPlugin === 'function' && 'core' in o;
     const candidates = new Set(captured);
-    try { for (const k of Object.keys(w)) { try { candidates.add(w[k]); } catch {} } } catch {}
+    if (!quick) try { for (const k of Object.keys(w)) { try { candidates.add(w[k]); } catch {} } } catch {}
     for (const v of queryAll('video, audio')) {
       for (const k of Object.keys(v)) { try { candidates.add(v[k]); } catch {} }
     }
@@ -426,7 +519,7 @@
   function dedupe(items) {
     const map = new Map();
     for (const it of items) {
-      const key = it.url ? it.url.replace(/#.*$/, '') : it.source + ':' + (it.element || Math.random());
+      const key = it.url ? streamKey(it.url) : it.source + ':' + (it.element || Math.random());
       const prev = map.get(key);
       if (!prev) { map.set(key, { ...it, foundBy: [it.source] }); continue; }
       if (!prev.foundBy.includes(it.source)) prev.foundBy.push(it.source);
@@ -440,11 +533,11 @@
   }
 
   async function scan(opts = {}) {
-    const { probe: doProbe = true, liveOnly = false, quiet = false, record = true } = opts;
+    const { probe: doProbe = true, liveOnly = false, quiet = false, record = true, quick = false } = opts;
     for (const win of windowsOf()) { hookLibraries(win); observeNetwork(win); }
     let items = dedupe([
       ...collectMediaElements(),
-      ...collectLibraries(),
+      ...collectLibraries(quick),
       ...collectEmbeds(),
       ...collectNetwork(),
       ...collectFromMarkup(),
@@ -454,9 +547,9 @@
 
     // Fold HLS variant playlists into their master instead of listing each quality separately.
     const variantOf = new Map();
-    for (const m of items) for (const v of m.variants || []) variantOf.set(v.url, m);
+    for (const m of items) for (const v of m.variants || []) variantOf.set(streamKey(v.url), m);
     items = items.filter(i => {
-      const master = variantOf.get(i.url);
+      const master = variantOf.get(streamKey(i.url));
       if (!master || i === master) return true;
       if (i.foundBy.some(s => s === 'element' || s === 'library')) return true;
       for (const s of i.foundBy) if (!master.foundBy.includes(s)) master.foundBy.push(s);
@@ -508,19 +601,28 @@
 
   function watch(callback = item => console.log('[MediaScraper] new stream:', item)) {
     if (watching) return;
+    // Keyed by streamKey(), so a playlist polled with changing parameters is reported once.
     const seen = new Set();
+    // Players without a URL (srcObject: WebRTC, camera) are tracked by element instead.
+    const seenNodes = new WeakSet();
+    const isNew = item => (item.url ? !seen.has(streamKey(item.url)) : !!item.node && item.kind !== 'embed' && item.type !== 'none' && !seenNodes.has(item.node));
     // Known HLS variant playlists count as seen, so a master's qualities aren't reported one by one.
     const markSeen = item => {
-      seen.add(item.url);
-      for (const v of item.variants || []) seen.add(v.url);
+      if (item.url) seen.add(streamKey(item.url));
+      else if (item.node) seenNodes.add(item.node);
+      for (const v of item.variants || []) seen.add(streamKey(v.url));
     };
     last.forEach(markSeen);
-    const report = (url, via, base) => {
+    // typeHint comes from a response's content type, for manifests whose URL has no extension.
+    const report = (url, via, base, typeHint) => {
       const full = abs(url, base);
-      if (!full || seen.has(full)) return;
-      if (!STREAM_EXT_RE.test(full) && !(via === 'websocket' && MEDIA_WS_RE.test(full))) return;
-      seen.add(full);
-      const item = { kind: 'stream', source: via, url: full, type: typeOf(full), live: null, foundBy: [via] };
+      if (!full) return;
+      const key = streamKey(full);
+      if (seen.has(key)) return;
+      if (!typeHint && !STREAM_EXT_RE.test(full) && !(via === 'websocket' && MEDIA_WS_RE.test(full))) return;
+      seen.add(key);
+      if (typeHint) rememberNetwork(key, typeHint); // so later scan() calls include it too
+      const item = { kind: 'stream', source: via, url: key, type: typeHint || typeOf(key), live: null, foundBy: [via] };
       probe(item).finally(() => { markSeen(item); callback(item); });
     };
 
@@ -539,15 +641,27 @@
         win.fetch = function (input, init) {
           // input may be a string, a URL object, or a Request.
           try { report(input && typeof input === 'object' && 'url' in input ? input.url : String(input), 'fetch', base()); } catch {}
-          return origFetch.apply(this, arguments);
+          const p = origFetch.apply(this, arguments);
+          // Check the response type too, for manifests served from URLs without an extension.
+          // Only headers are read, so the page's own use of the body is unaffected.
+          p.then(res => {
+            try { const t = manifestType(res.headers.get('content-type')); if (t) report(res.url, 'fetch', base(), t); } catch {}
+          }, () => {});
+          return p;
         };
         restores.push(() => { win.fetch = origFetch; });
       } catch {}
       try {
         const proto = win.XMLHttpRequest.prototype;
         const origOpen = proto.open;
+        const listening = new WeakSet();
+        const onHeaders = function () {
+          if (this.readyState !== 2) return; // HEADERS_RECEIVED
+          try { const t = manifestType(this.getResponseHeader('content-type')); if (t) report(this.responseURL, 'xhr', base(), t); } catch {}
+        };
         proto.open = function (method, url) {
           try { report(String(url), 'xhr', base()); } catch {}
+          if (!listening.has(this)) { listening.add(this); this.addEventListener('readystatechange', onHeaders); }
           return origOpen.apply(this, arguments);
         };
         restores.push(() => { proto.open = origOpen; });
@@ -580,8 +694,8 @@
         pending = false;
         if (!watching) return;
         attachAll();
-        for (const item of await scan({ quiet: true, probe: false, record: false })) {
-          if (item.url && !seen.has(item.url)) { seen.add(item.url); callback(item); }
+        for (const item of await scan({ quiet: true, probe: false, record: false, quick: true })) {
+          if (isNew(item)) { markSeen(item); callback(item); }
         }
       }, 500);
     };
@@ -595,6 +709,10 @@
         if (!observedRoots.has(r)) {
           observedRoots.add(r);
           mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+          // Setting video.srcObject (WebRTC) changes no attribute, but every new source fires
+          // loadstart. Media events don't bubble or cross shadow roots, so capture on each root.
+          r.addEventListener('loadstart', schedule, true);
+          restores.push(() => r.removeEventListener('loadstart', schedule, true));
         }
         if (r.defaultView) { hookWindow(r.defaultView); hookLibraries(r.defaultView); }
         // An iframe's document is replaced when it loads, so rescan (and re-hook) on load.
@@ -636,6 +754,7 @@
   // Start capturing as soon as the script loads, so instances and requests made before the first
   // scan() are seen.
   hookLibraries(global);
+  if (global.document && global.document.readyState === 'loading') trapLibraries(global);
   observeNetwork(global);
 
   global.MediaScraper = { scan, watch, unwatch, copy, toJSON, get results() { return last; } };
