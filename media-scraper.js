@@ -28,10 +28,14 @@
 
   const STREAM_RE = /(?:https?:)?\/\/[^\s"'<>\\]+?\.(?:m3u8|mpd|flv|f4m|ism\/manifest)(?:\?[^\s"'<>\\]*)?|(?:rtmps?|rtsp|srt|wss?):\/\/[^\s"'<>\\]+/gi;
   const STREAM_EXT_RE = /\.(m3u8|mpd|flv|f4m)(\?|#|$)|\/manifest(\(|\?|$)|^(rtmps?|rtsp|srt):/i;
+  // WebSockets that look like media (FLV/TS/MP4 over ws, /live/ or /stream/ paths), not chat or analytics.
+  const MEDIA_WS_RE = /^wss?:\/\/[^?#]*(?:\.(?:flv|ts|mp4|m4s|h264|mjpe?g)(?:[?#]|$)|\/(?:live|stream|streams|media|video|play)(?:[/?#]|$))/i;
+  const HLS_RE = /^\uFEFF?\s*#EXTM3U/;
+  const MPD_RE = /<MPD[\s>]/i;
 
   const EMBEDS = [
-    { name: 'YouTube',     re: /youtube(?:-nocookie)?\.com\/(?:embed|live)\/([\w-]+)|youtu\.be\/([\w-]+)/i },
-    { name: 'Twitch',      re: /(?:player|clips)\.twitch\.tv\/\?.*?(?:channel|video|clip)=([\w-]+)|twitch\.tv\/embed\/([\w-]+)/i },
+    { name: 'YouTube',     re: /youtube(?:-nocookie)?\.com\/embed\/live_stream\?(?:[^#]*&)?channel=([\w-]+)|youtube(?:-nocookie)?\.com\/(?:embed|live)\/([\w-]+)|youtu\.be\/([\w-]+)/i },
+    { name: 'Twitch',      re: /(?:player|clips)\.twitch\.tv\/(?:embed)?\?(?:[^#]*&)?(?:channel|video|clip)=([\w-]+)|twitch\.tv\/embed\/([\w-]+)/i },
     { name: 'Kick',        re: /player\.kick\.com\/([\w-]+)/i },
     { name: 'Vimeo',       re: /player\.vimeo\.com\/video\/(\d+)|vimeo\.com\/event\/(\d+)/i },
     { name: 'Facebook',    re: /facebook\.com\/plugins\/video\.php/i },
@@ -45,7 +49,7 @@
     { name: 'Livestream',  re: /livestream\.com\/accounts\/\d+\/events/i },
     { name: 'IBM Video',   re: /(?:ustream\.tv|video\.ibm\.com)\/embed/i },
     { name: 'Restream',    re: /player\.restream\.io/i },
-    { name: 'Owncast',     re: /\/embed\/video/i },
+    { name: 'Owncast',     re: /^https?:\/\/[^/]+\/embed\/video\/?(?:[?#]|$)/i },
   ];
 
   let last = [];
@@ -124,13 +128,16 @@
       try { if (el.seekable.length) seekableEnd = el.seekable.end(el.seekable.length - 1); } catch {}
       const live = el.duration === Infinity ||
         (seekableEnd !== null && Number.isFinite(el.duration) && seekableEnd > el.duration + 1);
+      // MSE players (hls.js, dash.js, …) often give live streams a finite, growing duration,
+      // so a finite duration only means VOD for direct sources.
+      const mse = String(sources[0] || '').startsWith('blob:');
       out.push({
         kind: el.tagName.toLowerCase(),
         source: 'element',
         url: sources[0] || null,
         alternates: sources.slice(1),
         type: sources[0] ? typeOf(sources[0]) : 'none',
-        live: live ? true : (el.duration > 0 && Number.isFinite(el.duration) ? false : null),
+        live: live ? true : (!mse && el.duration > 0 && Number.isFinite(el.duration) ? false : null),
         playing: !el.paused && !el.ended && el.readyState > 2,
         muted: el.muted,
         size: el.videoWidth ? `${el.videoWidth}x${el.videoHeight}` : null,
@@ -199,7 +206,10 @@
       }
     }
     for (const t of texts) {
-      const unescaped = t.replace(/\\\//g, '/').replace(/\\u002[fF]/g, '/').replace(/&amp;/g, '&');
+      // Undo JSON/JS escaping (\/, \u0026, ...) so query strings like stream tokens stay intact.
+      const unescaped = t.replace(/\\\//g, '/')
+        .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+        .replace(/&amp;/g, '&');
       for (const m of unescaped.matchAll(STREAM_RE)) {
         const url = abs(m[0].startsWith('//') ? location.protocol + m[0] : m[0]);
         if (url) out.push({ kind: 'stream', source: 'markup', url, type: typeOf(url), live: null });
@@ -288,6 +298,9 @@
       const res = await get(item.url, ctl.signal);
       const text = await res.text();
       item.status = res.status;
+      // Error pages (expired tokens, 403/404) have no ENDLIST either; don't read them as live.
+      if (!res.ok) { item.probeError = `HTTP ${res.status}`; return; }
+      if (!(item.type === 'hls' ? HLS_RE : MPD_RE).test(text)) { item.probeError = 'not a manifest'; return; }
       if (item.type === 'hls') {
         if (/#EXT-X-STREAM-INF/i.test(text)) {
           // Master playlist: probe the first variant to decide live vs VOD.
@@ -296,8 +309,11 @@
             url: abs(m[2].trim(), item.url),
           }));
           if (item.variants[0]) {
-            const v = await get(item.variants[0].url, ctl.signal).then(r => r.text());
-            item.live = !/#EXT-X-ENDLIST/i.test(v) && !/#EXT-X-PLAYLIST-TYPE:VOD/i.test(v);
+            const vr = await get(item.variants[0].url, ctl.signal);
+            const v = await vr.text();
+            if (!vr.ok) item.probeError = `variant HTTP ${vr.status}`;
+            else if (!HLS_RE.test(v)) item.probeError = 'variant not a manifest';
+            else item.live = !/#EXT-X-ENDLIST/i.test(v) && !/#EXT-X-PLAYLIST-TYPE:VOD/i.test(v);
           }
         } else {
           item.live = !/#EXT-X-ENDLIST/i.test(text) && !/#EXT-X-PLAYLIST-TYPE:VOD/i.test(text);
@@ -331,7 +347,7 @@
   }
 
   async function scan(opts = {}) {
-    const { probe: doProbe = true, liveOnly = false, quiet = false } = opts;
+    const { probe: doProbe = true, liveOnly = false, quiet = false, record = true } = opts;
     let items = dedupe([
       ...collectMediaElements(),
       ...collectLibraries(),
@@ -353,7 +369,7 @@
 
     if (liveOnly) items = items.filter(i => i.live === true);
     items.sort((a, b) => (b.live === true) - (a.live === true) || (b.playing === true) - (a.playing === true));
-    last = items;
+    if (record) last = items;
 
     if (!quiet) {
       console.log(`%c[MediaScraper] ${items.length} media item(s), ${items.filter(i => i.live === true).length} live`,
@@ -378,7 +394,8 @@
     const seen = new Set(last.map(i => i.url));
     const report = (url, via) => {
       const full = abs(url);
-      if (!full || seen.has(full) || !STREAM_EXT_RE.test(full)) return;
+      if (!full || seen.has(full)) return;
+      if (!STREAM_EXT_RE.test(full) && !(via === 'websocket' && MEDIA_WS_RE.test(full))) return;
       seen.add(full);
       const item = { kind: 'stream', source: via, url: full, type: typeOf(full), live: null, foundBy: [via] };
       probe(item).finally(() => callback(item));
@@ -388,26 +405,34 @@
     const origOpen = XMLHttpRequest.prototype.open;
     const origWS = global.WebSocket;
     global.fetch = function (input, init) {
-      try { report(typeof input === 'string' ? input : input.url, 'fetch'); } catch {}
+      // input may be a string, a URL object, or a Request.
+      try { report(input && typeof input === 'object' && 'url' in input ? input.url : String(input), 'fetch'); } catch {}
       return origFetch.apply(this, arguments);
     };
     XMLHttpRequest.prototype.open = function (method, url) {
-      try { report(url, 'xhr'); } catch {}
+      try { report(String(url), 'xhr'); } catch {}
       return origOpen.apply(this, arguments);
     };
-    global.WebSocket = function (url, protocols) {
-      try { report(url, 'websocket'); } catch {}
-      return new origWS(url, protocols);
-    };
-    global.WebSocket.prototype = origWS.prototype;
+    // A Proxy keeps WebSocket.OPEN etc., the prototype and instanceof working for the page.
+    global.WebSocket = new Proxy(origWS, {
+      construct(target, args, newTarget) {
+        try { report(String(args[0]), 'websocket'); } catch {}
+        return Reflect.construct(target, args, newTarget === global.WebSocket ? target : newTarget);
+      },
+    });
 
     const po = new PerformanceObserver(list => list.getEntries().forEach(e => report(e.name, 'network')));
     po.observe({ type: 'resource', buffered: false });
 
+    // Throttle, not debounce: pages with live chat change constantly, so a debounce never fires.
+    let pending = false;
     const mo = new MutationObserver(() => {
-      clearTimeout(mo._t);
-      mo._t = setTimeout(async () => {
-        for (const item of await scan({ quiet: true, probe: false })) {
+      if (pending) return;
+      pending = true;
+      setTimeout(async () => {
+        pending = false;
+        if (!watching) return;
+        for (const item of await scan({ quiet: true, probe: false, record: false })) {
           if (item.url && !seen.has(item.url)) { seen.add(item.url); callback(item); }
         }
       }, 500);
@@ -415,7 +440,7 @@
     mo.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
 
     watching = { origFetch, origOpen, origWS, po, mo };
-    console.log('[MediaScraper] watching for new streams… call MediaScraper.unwatch() to stop');
+    console.log('[MediaScraper] watching for new streams... call MediaScraper.unwatch() to stop');
   }
 
   function unwatch() {
