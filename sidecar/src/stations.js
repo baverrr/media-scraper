@@ -107,19 +107,30 @@ export class StationStore {
     this.sports = normalizeSports();
   }
 
+  // The market's defaults are only needed while the plugin hasn't saved its own stations or
+  // sports settings, so an unknown MARKET only fails startup then, and says which ones exist.
+  async marketDefaults() {
+    try {
+      return await loadMarket(this.marketsDir, this.market);
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+      const ids = (await readdir(this.marketsDir)).filter(f => f.endsWith('.json')).map(f => path.basename(f, '.json'));
+      throw new Error(`unknown market "${this.market}" (MARKET); available: ${ids.join(', ')}`);
+    }
+  }
+
   async load() {
-    const market = await loadMarket(this.marketsDir, this.market);
     try {
       this.stations = normalizeStations(JSON.parse(await readFile(this.stationsFile, 'utf8')));
     } catch (e) {
       if (e.code !== 'ENOENT') throw e;
-      this.stations = market.stations;
+      this.stations = (await this.marketDefaults()).stations;
     }
     try {
       this.sports = normalizeSports(JSON.parse(await readFile(this.sportsFile, 'utf8')));
     } catch (e) {
       if (e.code !== 'ENOENT') throw e;
-      this.sports = market.sports;
+      this.sports = (await this.marketDefaults()).sports;
     }
     return this;
   }
@@ -140,7 +151,7 @@ export class StationStore {
 
   // The configured market's bundled stations and teams, as the sidecar starts with them.
   async defaults() {
-    const market = await loadMarket(this.marketsDir, this.market);
+    const market = await this.marketDefaults();
     return { market: market.id, name: market.name, stations: market.stations, sports: market.sports };
   }
 

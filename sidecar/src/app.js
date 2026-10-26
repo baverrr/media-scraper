@@ -72,7 +72,9 @@ export class ResolutionCache {
     return exp ? exp - 15_000 : until + this.ttlMs;
   }
 
-  get(station, { force = false, priority = 1 } = {}) {
+  // keepOnFailure: a forced resolve whose failure shouldn't take down a stream that's playing
+  // (the settings page's Test button), unlike a re-resolve because upstream rejected the URL.
+  get(station, { force = false, priority = 1, keepOnFailure = false } = {}) {
     const now = this.now();
     const entry = this.entries.get(station.id);
     const stale = !force && entry?.value && entry.usable > now ? entry.value : null;
@@ -94,7 +96,7 @@ export class ResolutionCache {
           // A failed background refresh keeps the previous stream while it's still playable. A
           // failed forced one doesn't: upstream just rejected that stream, and serving it again
           // would re-force (and relaunch the browser) on every player poll instead of backing off.
-          const keep = !force && entry?.value && entry.usable > this.now();
+          const keep = (!force || keepOnFailure) && entry?.value && entry.usable > this.now();
           this.entries.set(station.id, keep
             ? { value: entry.value, usable: entry.usable, error, until: this.now() + this.failureMs }
             : { error, until: this.now() + this.failureMs });
@@ -381,7 +383,8 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
     if ((m = p.match(/^\/api\/stations\/([^/]+)\/test$/)) && method === 'POST') {
       const station = stationOr404(decodeURIComponent(m[1]), { requireEnabled: false });
       try {
-        const r = await cache.get(station, { force: true });
+        // A failed test (an ad slate, a bot check) leaves a stream that's playing alone.
+        const r = await cache.get(station, { force: true, keepOnFailure: true });
         return send(res, 200, {
           ok: true, id: station.id, via: r.via, type: r.type, url: r.url, tookMs: r.tookMs,
           expiresAt: r.expiresAt ? new Date(r.expiresAt).toISOString() : null,

@@ -305,3 +305,11 @@ test('dash.js used in the same script that defines it is still captured', async 
   assert.equal(v.manifest, `${origin}/live.mpd`);
   assert.ok(!v.manifestGuessed);
 });
+
+test('markup: the parameter holding the stream is unwrapped, not the first URL-valued one', async t => {
+  const page = await open(t, `<script>var p = "https://player.example/embed.html?poster=https://img.example/p.jpg&src=https://cdn.example/live/x.m3u8"</script>`);
+  if (!page) return;
+  const urls = (await scan(page, { probe: false })).map(i => i.url);
+  assert.ok(urls.includes('https://cdn.example/live/x.m3u8'), JSON.stringify(urls));
+  assert.ok(!urls.some(u => u.includes('img.example')), JSON.stringify(urls));
+});

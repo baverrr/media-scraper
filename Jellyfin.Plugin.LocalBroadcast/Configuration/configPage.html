@@ -291,6 +291,7 @@
                     });
                 }
 
+                // Resolves to whether the settings were saved.
                 function save() {
                     Dashboard.showLoadingMsg();
                     return ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
@@ -298,9 +299,11 @@
                         render();
                         // The server pushes the changes to the sidecar after saving.
                         setTimeout(refreshStatus, 1500);
+                        return true;
                     }, function () {
                         Dashboard.hideLoadingMsg();
                         Dashboard.alert('Saving the settings failed. Reload the page and try again.');
+                        return false;
                     });
                 }
 
@@ -446,7 +449,8 @@
                     };
                     var idx = config.Stations.findIndex(function (x) { return x.Id === id; });
                     if (idx >= 0) config.Stations[idx] = entry; else config.Stations.push(entry);
-                    save().then(resetForm);
+                    // Keep what was typed when saving fails, so it can be saved again.
+                    save().then(function (ok) { if (ok) resetForm(); });
                     return false;
                 });
             })();
