@@ -36,6 +36,8 @@ jobs:
           cache: npm
           cache-dependency-path: sidecar/package-lock.json
       - run: npm ci --no-audit --no-fund
+      # For the media-scraper.js browser tests (skipped when no browser is installed).
+      - run: npx playwright install --with-deps chromium
       - run: npm test
 
   plugin:

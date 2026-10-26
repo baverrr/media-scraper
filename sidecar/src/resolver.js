@@ -140,7 +140,8 @@ export class Resolver {
             : []));
         } catch { continue; }
         for (const i of items) {
-          if (i.manifest) found.push({ url: i.manifest, type: manifestTypeOf(i.manifest), sources: ['scan'], paired: true });
+          // A guessed pairing (the page's only manifest) gets no pairing bonus: it could be an ad.
+          if (i.manifest) found.push({ url: i.manifest, type: manifestTypeOf(i.manifest), sources: ['scan'], paired: !i.manifestGuessed });
           if ((i.type === 'hls' || i.type === 'dash') && i.url && /^https?:/.test(i.url)) {
             found.push({ url: i.url, type: i.type, sources: [i.foundBy?.includes('network') ? 'network' : 'scan'] });
           }
