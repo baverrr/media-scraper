@@ -1,0 +1,6 @@
+*
+!media-scraper.js
+!sidecar/package.json
+!sidecar/package-lock.json
+!sidecar/src/
+!sidecar/markets/

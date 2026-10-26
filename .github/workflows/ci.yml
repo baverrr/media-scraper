@@ -1,0 +1,185 @@
+# Tests both components on every push and pull request.
+# On main: publishes the sidecar image to GitHub Container Registry as :edge.
+# On a vX.Y.Z tag: publishes the image as :X.Y.Z and :latest, a GitHub release with the plugin
+# zip, and the Jellyfin plugin repository (manifest.json) on GitHub Pages.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/local-broadcast-sidecar
+
+jobs:
+  sidecar:
+    name: Sidecar tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecar
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sidecar/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  plugin:
+    name: Plugin build and tests
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Read version from build.yaml
+        id: version
+        run: |
+          version=$(sed -n 's/^version: "\(.*\)"$/\1/p' build.yaml)
+          test -n "$version" || { echo "::error file=build.yaml::No version found"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag matches build.yaml
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # v1.1.1 <-> 1.1.1.0
+          if [ "${TAG#v}.0" != "$VERSION" ] && [ "${TAG#v}" != "$VERSION" ]; then
+            echo "::error file=build.yaml::Tag $TAG does not match build.yaml version $VERSION"
+            exit 1
+          fi
+
+      - name: Build plugin
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: >
+          dotnet publish Jellyfin.Plugin.LocalBroadcast -c Release -o dist
+          -p:Version="$VERSION" -p:AssemblyVersion="$VERSION" -p:FileVersion="$VERSION"
+
+      - name: Run tests
+        run: dotnet test Jellyfin.Plugin.LocalBroadcast.Tests -c Release --logger "console;verbosity=normal"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p release
+          (cd dist && zip -q -X "../release/local-broadcast_${VERSION}.zip" Jellyfin.Plugin.LocalBroadcast.dll)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: local-broadcast-plugin
+          path: release/
+          if-no-files-found: error
+
+  image:
+    name: Sidecar image
+    needs: sidecar
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tags
+        id: tags
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF" == refs/tags/v* ]]; then
+            echo "tags=${IMAGE}:${REF_NAME#v},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${IMAGE}:edge" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: sidecar/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: Release and plugin repository
+    needs: [plugin, image]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: local-broadcast-plugin
+          path: release
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          notes=$(awk '/^changelog: >/{f=1;next} f&&/^  /{sub(/^  /,"");printf "%s ",$0;next} f{exit}' build.yaml)
+          printf '%s\n\nInstall: add the plugin repository `https://%s.github.io/%s/manifest.json` in Jellyfin, and run the sidecar image `%s:%s` (see the README).\n' \
+            "$notes" "$OWNER" "$REPO_NAME" "$IMAGE" "${TAG#v}" > notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" release/*.zip --clobber
+          else
+            gh release create "$TAG" release/*.zip --title "$TAG" --notes-file notes.md --verify-tag
+          fi
+
+      - name: Update the plugin repository on GitHub Pages (gh-pages branch)
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.plugin.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          zip="release/local-broadcast_${VERSION}.zip"
+          url="https://github.com/${REPOSITORY}/releases/download/${TAG}/local-broadcast_${VERSION}.zip"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages || true
+          if git rev-parse --verify origin/gh-pages > /dev/null 2>&1; then
+            git worktree add pages origin/gh-pages
+            git -C pages checkout -B gh-pages
+          else
+            git worktree add --orphan -b gh-pages pages
+          fi
+          python3 -I scripts/manifest.py build.yaml pages/manifest.json "$zip" "$url"
+          git -C pages add manifest.json
+          git -C pages commit -m "Plugin repository: Local Broadcast ${VERSION}"
+          git -C pages push origin gh-pages

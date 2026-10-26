@@ -1,0 +1,253 @@
+{
+  "name": "Denver, CO",
+  "timezone": "America/Denver",
+  "sportsChannel": "1.1",
+  "teams": [
+    {
+      "league": "nfl",
+      "team": "den",
+      "name": "Denver Broncos"
+    },
+    {
+      "league": "nba",
+      "team": "den",
+      "name": "Denver Nuggets"
+    },
+    {
+      "league": "nhl",
+      "team": "col",
+      "name": "Colorado Avalanche"
+    },
+    {
+      "league": "mlb",
+      "team": "col",
+      "name": "Colorado Rockies"
+    },
+    {
+      "league": "mls",
+      "team": "184",
+      "name": "Colorado Rapids"
+    },
+    {
+      "league": "nwsl",
+      "team": "131563",
+      "name": "Denver Summit FC"
+    },
+    {
+      "league": "ncaaf",
+      "team": "38",
+      "name": "Colorado Buffaloes"
+    },
+    {
+      "league": "ncaaf",
+      "team": "36",
+      "name": "Colorado State Rams"
+    },
+    {
+      "league": "ncaaf",
+      "team": "2005",
+      "name": "Air Force Falcons"
+    },
+    {
+      "league": "ncaam",
+      "team": "38",
+      "name": "Colorado Buffaloes"
+    },
+    {
+      "league": "ncaam",
+      "team": "36",
+      "name": "Colorado State Rams"
+    }
+  ],
+  "stations": [
+    {
+      "id": "kwgn",
+      "callSign": "KWGN",
+      "name": "CW2",
+      "channel": "2.1",
+      "network": "The CW",
+      "url": "https://kdvr.com/live/kwgn/",
+      "enabled": false,
+      "note": "Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+    },
+    {
+      "id": "kcdo",
+      "callSign": "KCDO",
+      "name": "The Spot Denver 3",
+      "channel": "3.1",
+      "network": "Independent",
+      "url": "https://www.thespottv.com/denver-3",
+      "enabled": false,
+      "note": "No live stream on the station website."
+    },
+    {
+      "id": "kcnc",
+      "callSign": "KCNC",
+      "name": "CBS Colorado",
+      "channel": "4.1",
+      "network": "CBS",
+      "url": "https://www.cbsnews.com/colorado/live/",
+      "enabled": true
+    },
+    {
+      "id": "koaa",
+      "callSign": "KOAA",
+      "name": "News5",
+      "channel": "5.1",
+      "network": "NBC",
+      "url": "https://www.koaa.com/live",
+      "enabled": true,
+      "note": "Colorado Springs / Pueblo."
+    },
+    {
+      "id": "krma",
+      "callSign": "KRMA",
+      "name": "Rocky Mountain PBS",
+      "channel": "6.1",
+      "network": "PBS",
+      "url": "https://www.rmpbs.org/livestream",
+      "enabled": false,
+      "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt."
+    },
+    {
+      "id": "kmgh",
+      "callSign": "KMGH",
+      "name": "Denver7",
+      "channel": "7.1",
+      "network": "ABC",
+      "url": "https://www.denver7.com/live",
+      "enabled": true
+    },
+    {
+      "id": "kusa",
+      "callSign": "KUSA",
+      "name": "9NEWS",
+      "channel": "9.1",
+      "network": "NBC",
+      "url": "https://www.9news.com/watch",
+      "enabled": true
+    },
+    {
+      "id": "kktv",
+      "callSign": "KKTV",
+      "name": "KKTV 11 News",
+      "channel": "11.1",
+      "network": "CBS",
+      "url": "https://www.kktv.com/livestream/",
+      "enabled": false,
+      "note": "Colorado Springs. The station player fails in headless browsers."
+    },
+    {
+      "id": "kbdi",
+      "callSign": "KBDI",
+      "name": "PBS12",
+      "channel": "12.1",
+      "network": "PBS",
+      "url": "https://www.pbs12.org/livestream",
+      "enabled": false,
+      "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt."
+    },
+    {
+      "id": "krdo",
+      "callSign": "KRDO",
+      "name": "KRDO 13",
+      "channel": "13.1",
+      "network": "ABC",
+      "url": "https://krdo.com/live/",
+      "enabled": false,
+      "note": "Colorado Springs. The page only offers recorded clips."
+    },
+    {
+      "id": "kcec",
+      "callSign": "KCEC",
+      "name": "Univision Colorado",
+      "channel": "14.1",
+      "network": "Univision",
+      "url": "https://www.univision.com/local/denver-kcec",
+      "enabled": false,
+      "note": "Univision streams only in its app."
+    },
+    {
+      "id": "ktvd",
+      "callSign": "KTVD",
+      "name": "My20",
+      "channel": "20.1",
+      "network": "MyNetworkTV",
+      "url": "https://www.9news.com/watch",
+      "enabled": false,
+      "note": "No separate web stream; the 9NEWS page plays KUSA.",
+      "sportsAliases": [
+        "Altitude Sports",
+        "Altitude"
+      ]
+    },
+    {
+      "id": "kden",
+      "callSign": "KDEN",
+      "name": "Telemundo Denver",
+      "channel": "25.1",
+      "network": "Telemundo",
+      "url": "https://www.telemundodenver.com/en-vivo/",
+      "enabled": true
+    },
+    {
+      "id": "kdvr",
+      "callSign": "KDVR",
+      "name": "FOX31",
+      "channel": "31.1",
+      "network": "FOX",
+      "url": "https://kdvr.com/live/fox31/",
+      "enabled": false,
+      "note": "Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+    },
+    {
+      "id": "kpjr",
+      "callSign": "KPJR",
+      "name": "TBN Denver",
+      "channel": "38.1",
+      "network": "TBN",
+      "url": "https://www.tbn.org/live",
+      "enabled": false,
+      "note": "No stream found on the page."
+    },
+    {
+      "id": "krmt",
+      "callSign": "KRMT",
+      "name": "Daystar",
+      "channel": "41.1",
+      "network": "Daystar",
+      "url": "https://www.daystar.com/live/",
+      "enabled": true
+    },
+    {
+      "id": "ktfd",
+      "callSign": "KTFD",
+      "name": "UniMas Colorado",
+      "channel": "50.1",
+      "network": "UniMas",
+      "url": "https://www.univision.com/unimas",
+      "enabled": false,
+      "note": "Univision streams only in its app."
+    },
+    {
+      "id": "ketd",
+      "callSign": "KETD",
+      "name": "Estrella TV Denver",
+      "channel": "53.1",
+      "network": "Estrella TV",
+      "url": "https://www.estrellatv.com/live",
+      "enabled": false,
+      "note": "No stream found on the page."
+    },
+    {
+      "id": "kpxc",
+      "callSign": "KPXC",
+      "name": "ION Denver",
+      "channel": "59.1",
+      "network": "ION",
+      "url": "https://iontelevision.com/live",
+      "enabled": false,
+      "note": "ION streams only in its apps and FAST services."
+    }
+  ]
+}
