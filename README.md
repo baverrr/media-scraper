@@ -93,10 +93,12 @@ HTTP API: `GET /playlist.m3u`, `GET /guide.xml`, `GET /stream/<id>.m3u8` (`local
 ### Development
 
 ```bash
-(cd sidecar && npm ci && npm test)
+(cd sidecar && npm ci && npx playwright install chromium && npm test)
 docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet test Jellyfin.Plugin.LocalBroadcast.Tests
 docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
 ```
+
+The sidecar tests include `media-scraper.js` in a real browser (`sidecar/test/scraper.test.js`); they're skipped when Playwright has no browser installed.
 
 CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main), and on a `vX.Y.Z` tag matching `version` in `build.yaml` publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin repository manifest on GitHub Pages. Installing from GitHub needs the repository, its Pages site and the container package to be public. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
 
@@ -143,31 +145,38 @@ Loaded this way, it hooks each library the moment the library assigns itself to 
 
 | Source | Details |
 | --- | --- |
-| `<video>` / `<audio>` | Including open shadow DOM and same-origin iframes. Live when `duration === Infinity` or the seekable range extends past the duration. Players fed a MediaStream (`srcObject`: WebRTC, camera, canvas capture) are reported as `mediastream` and always live. |
+| `<video>` / `<audio>` | Including shadow DOM (closed roots too, when [loaded early](#loading-early-recommended-for-mse-players)) and same-origin iframes. Live when `duration === Infinity` or the seekable range extends past the duration. Players fed a MediaStream (`srcObject`: WebRTC, camera, canvas capture) are reported as `mediastream` and always live. |
 | Stream URLs | HLS (`.m3u8`), DASH (`.mpd`), Smooth Streaming, FLV, HDS, RTMP, RTSP, SRT, media WebSockets — from network requests, `<source>` tags, attributes, inline scripts and JSON (handles `\/` and `\uXXXX` escaping, and relative paths such as `"/live/index.m3u8"`). WebSockets in scripts are kept only when they look like media (`.flv`/`.ts`/`.mp4`, or `/live/`, `/stream/`, `/media/` paths). |
-| Embeds | YouTube, Twitch, Kick, Vimeo, Facebook, Dailymotion, Rumble, Streamable, Wistia, Brightcove, JW Player, Mux, Livestream, IBM Video, Restream, Owncast — with the video/channel ID. |
-| Player libraries | video.js, JW Player, Plyr, Flowplayer, hls.js, dash.js, Shaka Player, Clappr. |
+| Embeds | YouTube, Twitch, Kick, Vimeo, Facebook, Dailymotion, Rumble, Streamable, Wistia, Brightcove, JW Player, Mux, Livestream, IBM Video, Restream, Owncast — with the video/channel ID. Lazy-loaded iframes are read from `data-src`. |
+| Player libraries | video.js, JW Player, Plyr, Flowplayer, hls.js, dash.js, Shaka Player, Clappr — in the page and in same-origin iframes. |
 
-Results are deduplicated by URL; each item lists every method that found it in `foundBy`. HLS variant playlists are folded into their master playlist (listed in its `variants`) rather than reported separately.
+Smooth Streaming URLs (`.ism/Manifest`) are typed `smooth`, or `hls` / `dash` for Azure Media Services' `Manifest(format=m3u8-aapl)` / `(format=mpd-…)`.
+
+Results are deduplicated by URL (players without a URL, such as WebRTC, by element); each item lists every method that found it in `foundBy`. HLS variant playlists are folded into their master playlist (listed in its `variants`) rather than reported separately.
 
 Before comparing URLs, parameters that change on every request are dropped: low-latency HLS directives (`_HLS_msn`, `_HLS_part`, …) and cache-busters (`_`, `t`, `ts`, `cb`, `rnd`, …) when their value is a timestamp or random number. A playlist polled once a second is one result, not hundreds. Other parameters, such as signed tokens, are kept exactly as they were.
 
 #### Network capture
 
-As soon as the script loads, it starts a `PerformanceObserver` that records stream requests. Browsers keep only 250 entries in the resource timing buffer, and a live page re-fetches its playlist every few seconds, so `performance.getEntries()` alone stops showing new manifests quickly; the observer keeps receiving them. It keeps the 500 most recently active streams. Same-origin iframes are observed from the first scan that finds them.
+As soon as the script loads, it starts a `PerformanceObserver` that records stream requests. Browsers keep only 250 entries in the resource timing buffer, and a live page re-fetches its playlist every few seconds, so `performance.getEntries()` alone stops showing new manifests quickly; the observer keeps receiving them. It keeps the 500 most recently active streams. Same-origin iframes are observed from the first scan that finds them. In Chrome 129 and later, which report each response's content type in resource timing, manifests whose URL has no extension (`/api/stream/123`) are recognised here too.
 
 #### Pairing players with manifests
 
 MSE players (hls.js, dash.js, Shaka) play a `blob:` URL, so the `<video>` itself doesn't say what it's playing. The script hooks `Hls.prototype`, `shaka.Player.prototype` and the `dashjs.MediaPlayer` factory to capture instances created or loaded from then on. If the libraries don't exist yet because the script was [loaded early](#loading-early-recommended-for-mse-players), it hooks each one as soon as it's assigned to `window`. Each MSE element is then linked to its own instance's manifest (`manifest`, `library`) and inherits its live status.
 
-Without a captured instance, the script only guesses when it's unambiguous — one unpaired MSE element and one live manifest — and marks the guess with `manifestGuessed: true`.
+Without a captured instance, the script only guesses when it's unambiguous — one unpaired MSE element and one live manifest, or with `probe: false`, one manifest not known to be VOD — and marks the guess with `manifestGuessed: true`.
+
+Loading the script a second time (a pasted copy on top of a userscript, say) keeps what the first copy's hooks captured.
 
 #### Live probing
 
 With `probe` on (the default), HLS and DASH manifests whose status is unknown are fetched:
 
-- **HLS** — live if the media playlist has no `#EXT-X-ENDLIST` and isn't `PLAYLIST-TYPE:VOD`. For a master playlist, the first variant is checked.
+- **HLS** — live if the media playlist has no `#EXT-X-ENDLIST` and isn't `PLAYLIST-TYPE:VOD`. For a master playlist, the first variant is checked (resolved against the master's URL after redirects).
 - **DASH** — live if the MPD has `type="dynamic"`.
+- **Smooth Streaming** — live if the manifest has `IsLive="TRUE"`.
+
+At most six manifests are fetched at a time.
 
 Requests go out with cookies first (for token-gated streams), then without (for CDNs that send `Access-Control-Allow-Origin: *`).
 
@@ -190,7 +199,7 @@ Requests go out with cookies first (for token-gated streams), then without (for 
 
 ### Watch mode
 
-`watch()` hooks `fetch`, `XMLHttpRequest`, `WebSocket` and resource timing in the page and in every same-origin iframe, including iframes added or reloaded later. It also observes DOM changes in open shadow roots and iframe documents.
+`watch()` hooks `fetch`, `XMLHttpRequest`, `WebSocket` and resource timing in the page and in every same-origin iframe, including iframes added or navigated later. When it starts, it reports what's already on the page and wasn't in the last `scan()`'s results, including streams requested since the script loaded. It also observes DOM changes in open shadow roots and iframe documents.
 
 - **Manifests without an extension** (`/api/stream/123`) are recognised from the response's content type (`application/vnd.apple.mpegurl`, `application/dash+xml`, …). Only the headers are read, so the page's own use of the response is unaffected. Later `scan()` calls include them too.
 - **WebRTC players started later** are caught through the media `loadstart` event, since setting `srcObject` changes no attribute.
@@ -201,9 +210,8 @@ Requests go out with cookies first (for token-gated streams), then without (for 
 ### Limitations
 
 - Cross-origin iframes can't be inspected; only their `src` is reported.
-- Closed shadow roots are invisible.
+- Closed shadow roots are seen only when the script is loaded early, before they're created.
 - Live probing is subject to CORS; blocked items keep `live: null` and get a `probeError`.
-- `watch()` only sees requests made after it starts, so call it before the player loads.
 - Player instances created before the script loads, or from a library bundled into the site's code instead of exposed as `window.Hls` / `shaka` / `dashjs`, can't be captured, so their MSE elements are paired only when the guess is unambiguous.
-- Manifests without a file extension are recognised only by `watch()`, from requests made after it starts; `scan()` alone can't see response content types.
+- Manifests without a file extension are recognised by `scan()` only in browsers whose resource timing reports content types (Chrome 129+); elsewhere only `watch()` sees them, from its `fetch`/XHR hooks.
 - When loaded early, the script briefly defines `Hls`, `shaka` and `dashjs` on `window` (returning `undefined`) until the real libraries arrive, so a page that tests `'Hls' in window` rather than `window.Hls` could misread it.
