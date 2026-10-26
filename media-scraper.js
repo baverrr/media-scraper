@@ -38,10 +38,13 @@
   const STREAM_EXT_RE = /\.(m3u8|mpd|flv|f4m)(\?|#|$)|\.isml?\/manifest(\(|\?|#|$)|^(rtmps?|rtsp|srt):/i;
   // WebSockets that look like media (FLV/TS/MP4 over ws, /live/ or /stream/ paths), not chat or analytics.
   const MEDIA_WS_RE = /^wss?:\/\/[^?#]*(?:\.(?:flv|ts|mp4|m4s|h264|mjpe?g)(?:[?#]|$)|\/(?:live|stream|streams|media|video|play)(?:[/?#]|$))/i;
+  const STREAM_IN_PATH_RE = /\.(?:m3u8|mpd|flv|f4m)(?![\w.~/-])|\.isml?\/manifest/i;
   const HLS_RE = /^\uFEFF?\s*#EXTM3U/;
   const MPD_RE = /<MPD[\s>]/i;
   // Quoted relative paths to a manifest ("/live/index.m3u8", "../a.mpd", "index.m3u8?x=1").
-  const REL_STREAM_RE = /["'`]((?:\.{1,2}\/|\/(?!\/))?[\w\-.~%/]*\.(?:m3u8|mpd)(?:\?[^\s"'`<>\\]*)?)["'`]/gi;
+  // A name is required before the extension (code like `u.indexOf(".m3u8")` isn't a path), and
+  // pieces of string concatenation ("/live/" + id + ".m3u8") are skipped.
+  const REL_STREAM_RE = /(?<!\+\s*)["'`]((?:\.{1,2}\/|\/(?!\/))?[\w\-.~%/]*[\w\-~%]\.(?:m3u8|mpd)(?:\?[^\s"'`<>\\]*)?)["'`](?!\s*\+)/gi;
   // Response content types that identify a manifest when the URL has no telling extension.
   const MANIFEST_TYPES = [
     { re: /mpegurl/i, type: 'hls' },
@@ -263,6 +266,26 @@
   // When the script runs before the libraries load (a userscript at document-start, Puppeteer's
   // evaluateOnNewDocument), hook each library the moment its UMD build assigns it to window.
   // Only used while the document is still loading: until assigned, `'Hls' in window` is true.
+  // Namespaces assigned empty and filled in afterwards, by the member that matters: dash.js runs
+  // `dashjs = {}` and sets MediaPlayer later, possibly in the same script as the app code that
+  // creates the player (so the next-tick hook below would be too late).
+  const NAMESPACE_MEMBERS = { shaka: 'Player', dashjs: 'MediaPlayer' };
+
+  function trapMember(win, ns, member) {
+    try {
+      if (!ns || typeof ns !== 'object' || Object.getOwnPropertyDescriptor(ns, member)) return;
+      Object.defineProperty(ns, member, {
+        configurable: true,
+        enumerable: false,
+        get() { return undefined; },
+        set(value) {
+          Object.defineProperty(ns, member, { value, writable: true, configurable: true, enumerable: true });
+          hookLibraries(win);
+        },
+      });
+    } catch {}
+  }
+
   function trapLibraries(win) {
     for (const name of ['Hls', 'shaka', 'dashjs']) {
       try {
@@ -275,6 +298,7 @@
             // Turn back into a plain property, then hook. Hook again on the next tick too, for
             // namespaces like `shaka` whose members are filled in after it's assigned.
             Object.defineProperty(win, name, { value, writable: true, configurable: true, enumerable: true });
+            if (NAMESPACE_MEMBERS[name]) trapMember(win, value, NAMESPACE_MEMBERS[name]);
             hookLibraries(win);
             win.setTimeout(() => hookLibraries(win), 0);
           },
@@ -356,6 +380,15 @@
     return out;
   }
 
+  // Live embed URLs: /live/..., /embed/live_stream, /event(s)/..., or a channel= player (YouTube,
+  // Twitch). Only the path and that parameter count: `?origin=https://livestream.station...` doesn't.
+  function embedIsLive(src) {
+    try {
+      const u = new URL(src);
+      return /\/live(?:[/_]|$)|\/events?\//i.test(u.pathname) || u.searchParams.has('channel');
+    } catch { return false; }
+  }
+
   function collectEmbeds() {
     const out = [];
     for (const el of queryAll('iframe, embed, object')) {
@@ -375,7 +408,7 @@
           id: m.slice(1).find(Boolean) || null,
           url: src,
           type: 'embed',
-          live: /\/live|live_stream|channel=|event\//i.test(src) ? true : null,
+          live: embedIsLive(src) ? true : null,
           visible: isVisible(el),
           element: describe(el),
           node: el,
@@ -408,8 +441,12 @@
       let found = m[0];
       // A manifest passed to a player page (`embed?src=https://cdn/x.m3u8`, maybe percent-encoded)
       // matches as the player's URL; the stream is the parameter.
+      // Only when the stream's extension is in the parameter: a manifest whose own query carries
+      // a URL (`master.m3u8?ref=https%3A%2F%2Fstation...`) is the stream itself.
       const nested = found.match(/[?&][^=&]*=((?:https?(?::|%3A))?(?:\/\/|%2F%2F).*)$/i);
-      if (nested) { try { found = decodeURIComponent(nested[1]); } catch { found = nested[1]; } }
+      if (nested && !STREAM_IN_PATH_RE.test(found.slice(0, nested.index))) {
+        try { found = decodeURIComponent(nested[1]); } catch { found = nested[1]; }
+      }
       const url = abs(found.startsWith('//') ? location.protocol + found : found, base);
       // Scripts are full of chat/analytics sockets; keep only ones that look like media.
       if (url && /^wss?:/i.test(url) && !MEDIA_WS_RE.test(url)) continue;
@@ -541,9 +578,13 @@
 
   // Try with cookies first (token-gated streams), then without: CDNs that answer with
   // `Access-Control-Allow-Origin: *` reject credentialed requests.
+  // Probes use the fetch the page had when this script loaded, so watch()'s own fetch hook
+  // doesn't report the probe's requests (a master's first variant) as streams the page loaded.
+  const pageFetch = typeof global.fetch === 'function' ? global.fetch : null;
+  const fetchNative = (url, init) => (pageFetch || fetch).call(global, url, init);
   async function get(url, signal) {
-    try { return await fetch(url, { signal, credentials: 'include' }); }
-    catch (e) { if (e.name === 'AbortError') throw e; return fetch(url, { signal, credentials: 'omit' }); }
+    try { return await fetchNative(url, { signal, credentials: 'include' }); }
+    catch (e) { if (e.name === 'AbortError') throw e; return fetchNative(url, { signal, credentials: 'omit' }); }
   }
 
   // Each #EXT-X-STREAM-INF is followed by its URI on the next line that isn't blank or a tag.
@@ -658,6 +699,9 @@
       if (!master || i === master) return true;
       if (i.foundBy.some(s => s === 'element' || s === 'library')) return true;
       for (const s of i.foundBy) if (!master.foundBy.includes(s)) master.foundBy.push(s);
+      // The master's probe only checks its first variant (which may be gone); one that's live
+      // makes the stream live.
+      if (i.live === true && master.live !== true) master.live = true;
       return false;
     });
 
@@ -717,14 +761,22 @@
     const seenNodes = new WeakSet();
     const isNew = item => (item.url ? !seen.has(streamKey(item.url)) : !!item.node && item.kind !== 'embed' && item.type !== 'none' && !seenNodes.has(item.node));
     // Known HLS variant playlists count as seen, so a master's qualities aren't reported one by one.
+    const variantKeys = new Set();
     const markSeen = item => {
       if (item.url) seen.add(streamKey(item.url));
       else if (item.node) seenNodes.add(item.node);
-      for (const v of item.variants || []) seen.add(streamKey(v.url));
+      for (const v of item.variants || []) { seen.add(streamKey(v.url)); variantKeys.add(streamKey(v.url)); }
     };
     last.forEach(markSeen);
+    // Probes in flight. A player requests its variant right after the master, before the master's
+    // probe has listed its variants, so each report first waits for the other probes to finish.
+    const probes = new Set();
+    const session = {};
+    const active = () => watching === session;
     // typeHint comes from a response's content type, for manifests whose URL has no extension.
     const report = (url, via, base, typeHint) => {
+      // A page that kept a reference to a hooked function still calls this after unwatch().
+      if (!active()) return;
       const full = abs(url, base);
       if (!full) return;
       const key = streamKey(full);
@@ -733,7 +785,15 @@
       seen.add(key);
       if (typeHint) rememberNetwork(key, typeHint); // so later scan() calls include it too
       const item = { kind: 'stream', source: via, url: key, type: typeHint || typeOf(key), live: null, foundBy: [via] };
-      probe(item).finally(() => { markSeen(item); callback(item); });
+      const done = probe(item).finally(() => markSeen(item));
+      probes.add(done);
+      done.then(async () => {
+        probes.delete(done);
+        await Promise.allSettled([...probes]);
+        if (!active()) return; // unwatch() was called meanwhile
+        if (!item.variants && variantKeys.has(key)) return; // a quality of a master already reported
+        callback(item);
+      });
     };
 
     const restores = [];
@@ -755,7 +815,7 @@
       const base = () => { try { return win.location.href; } catch { return undefined; } };
       try {
         const origFetch = win.fetch;
-        win.fetch = function (input, init) {
+        const hookedFetch = win.fetch = function (input, init) {
           // input may be a string, a URL object, or a Request.
           let url = '';
           try { url = input && typeof input === 'object' && 'url' in input ? input.url : String(input); report(url, 'fetch', base()); } catch {}
@@ -768,7 +828,9 @@
           }, () => {});
           return p;
         };
-        restore(() => { win.fetch = origFetch; });
+        // Only if it's still ours: a wrapper the page added on top since (analytics, error
+        // reporting) stays, and keeps calling through to ours, which then just passes requests on.
+        restore(() => { if (win.fetch === hookedFetch) win.fetch = origFetch; });
       } catch {}
       try {
         const proto = win.XMLHttpRequest.prototype;
@@ -779,12 +841,12 @@
           if (this.readyState !== 2) return; // HEADERS_RECEIVED
           try { const t = manifestType(this.getResponseHeader('content-type')); if (t) report(this.responseURL || requested.get(this), 'xhr', base(), t); } catch {}
         };
-        proto.open = function (method, url) {
+        const hookedOpen = proto.open = function (method, url) {
           try { requested.set(this, String(url)); report(String(url), 'xhr', base()); } catch {}
           if (!listening.has(this)) { listening.add(this); this.addEventListener('readystatechange', onHeaders); }
           return origOpen.apply(this, arguments);
         };
-        restore(() => { proto.open = origOpen; });
+        restore(() => { if (proto.open === hookedOpen) proto.open = origOpen; });
       } catch {}
       try {
         const origWS = win.WebSocket;
@@ -796,7 +858,7 @@
           },
         });
         win.WebSocket = proxy;
-        restore(() => { win.WebSocket = origWS; });
+        restore(() => { if (win.WebSocket === proxy) win.WebSocket = origWS; });
       } catch {}
       try {
         // buffered: an iframe's document makes requests before the rescan that hooks it.
@@ -813,9 +875,11 @@
       pending = true;
       setTimeout(async () => {
         pending = false;
-        if (!watching) return;
+        if (!active()) return;
         attachAll();
-        for (const item of await scan({ quiet: true, probe: false, record: false, quick: true })) {
+        const items = await scan({ quiet: true, probe: false, record: false, quick: true });
+        if (!active()) return;
+        for (const item of items) {
           if (isNew(item)) { markSeen(item); callback(item); }
         }
       }, 500);
@@ -846,7 +910,8 @@
       }
     }
 
-    watching = { restores };
+    session.restores = restores;
+    watching = session;
     attachAll();
     // Report what's already on the page and not in the last scan's results: streams requested
     // since the script loaded, players created before watch() started.

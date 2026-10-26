@@ -99,3 +99,8 @@ test('non-http key URIs are left alone', () => {
   assert.match(out, /URI="data:text\/plain;base64,AA"/);
   assert.match(out, /^P\(segment:https:\/\/c\/v\/a\.ts\)$/m);
 });
+
+test('reads Wowza and Edgecast token expiries', () => {
+  assert.equal(expiryFromUrl('https://wz/a.m3u8?wowzatokenstarttime=1&wowzatokenendtime=1800000000&wowzatokenhash=h'), 1_800_000_000_000);
+  assert.equal(expiryFromUrl('https://ec/a.m3u8?ec_expire=1800000000&ec_hash=h'), 1_800_000_000_000);
+});

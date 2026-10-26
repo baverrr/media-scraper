@@ -82,3 +82,10 @@ test('only replayable request headers are kept', () => {
     { referer: 'https://a', 'user-agent': 'UA', cookie: 'c=1', 'x-player-token': 't' },
   );
 });
+
+test('pick: a live HLS stream beats a paired DASH one (DASH is only redirected, without headers)', () => {
+  const dash = { url: 'https://cdn/live/manifest.mpd', type: 'dash', paired: true, sources: ['network'], probe: { ok: true, live: true, master: true, dash: true } };
+  const hls = { url: 'https://cdn/live/master.m3u8', type: 'hls', sources: ['scan'], probe: { ok: true, live: true, master: false } };
+  assert.equal(pickBest([dash, hls]).url, hls.url);
+  assert.equal(pickBest([dash]).url, dash.url); // still used when it's all there is
+});

@@ -149,13 +149,14 @@ export function rewriteMedia(text, baseUrl, mediaUrl) {
 }
 
 // Expiry of a signed URL, in epoch milliseconds, from common CDN conventions: `exp=` / `expires=`
-// query parameters (seconds or milliseconds) and Akamai `hdnts=...~exp=...` tokens.
+// query parameters (seconds or milliseconds), Wowza's `wowzatokenendtime=`, Edgecast/Edgio's
+// `ec_expire=` and Akamai `hdnts=...~exp=...` tokens.
 export function expiryFromUrl(url) {
   let u;
   try { u = new URL(url); } catch { return null; }
   const values = [];
   for (const [k, v] of u.searchParams) {
-    if (/^(exp|expires|expiry|expire|e)$/i.test(k)) values.push(v);
+    if (/^(exp|expires|expiry|expire|e|ec_expire|wowzatokenendtime)$/i.test(k)) values.push(v);
     if (/^(hdnts|hdnea|__token__)$/i.test(k)) {
       const m = v.match(/(?:^|~)exp=(\d+)/);
       if (m) values.push(m[1]);

@@ -50,17 +50,26 @@ export class ResolutionCache {
     this.entries = new Map();
   }
 
+  // The token expiry read from the URL, unless it's already past: the URL was just found working,
+  // so a past value is something else (an event timestamp in an `e=` parameter, say). Trusting it
+  // would re-resolve every 30 s, with nothing playable to serve meanwhile.
+  knownExpiry(value) {
+    return value.expiresAt && value.expiresAt > this.now() ? value.expiresAt : null;
+  }
+
   expiryFor(value) {
     const now = this.now();
     let until = now + this.ttlMs;
-    if (value.expiresAt) until = Math.min(until, Math.max(now + 30_000, value.expiresAt - 120_000));
+    const exp = this.knownExpiry(value);
+    if (exp) until = Math.min(until, Math.max(now + 30_000, exp - 120_000));
     return until;
   }
 
   // Until when a resolution can still be played: its token's expiry, or without a known expiry
   // one more TTL past the refresh time (an upstream 401/403 forces a re-resolve before that).
   usableUntil(value, until) {
-    return value.expiresAt ? value.expiresAt - 15_000 : until + this.ttlMs;
+    const exp = this.knownExpiry(value);
+    return exp ? exp - 15_000 : until + this.ttlMs;
   }
 
   get(station, { force = false, priority = 1 } = {}) {
@@ -82,8 +91,10 @@ export class ResolutionCache {
       },
       error => {
         if (current()) {
-          // A failed background refresh keeps the previous stream while it's still playable.
-          const keep = entry?.value && entry.usable > this.now();
+          // A failed background refresh keeps the previous stream while it's still playable. A
+          // failed forced one doesn't: upstream just rejected that stream, and serving it again
+          // would re-force (and relaunch the browser) on every player poll instead of backing off.
+          const keep = !force && entry?.value && entry.usable > this.now();
           this.entries.set(station.id, keep
             ? { value: entry.value, usable: entry.usable, error, until: this.now() + this.failureMs }
             : { error, until: this.now() + this.failureMs });
