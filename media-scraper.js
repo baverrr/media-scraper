@@ -31,7 +31,8 @@
 (function (global, devtoolsCopy) {
   'use strict';
 
-  const STREAM_RE = /(?:https?:)?\/\/[^\s"'<>\\]+?\.(?:m3u8|mpd|flv|f4m|isml?\/manifest(?:\([^\s"'<>\\)]*\))?)(?:\?[^\s"'<>\\]*)?|(?:rtmps?|rtsp|srt|wss?):\/\/[^\s"'<>\\]+/gi;
+  // The extension must end the path: `a.m3u8.jpg` is an image, not `a.m3u8`.
+  const STREAM_RE = /(?:https?:)?\/\/[^\s"'<>\\]+?\.(?:m3u8|mpd|flv|f4m|isml?\/manifest(?:\([^\s"'<>\\)]*\))?)(?![\w.~/-])(?:(?:\?|%3F)[^\s"'<>\\]*)?|(?:rtmps?|rtsp|srt|wss?):\/\/[^\s"'<>\\]+/gi;
   // Smooth Streaming manifests end in `.ism/Manifest` (or `.isml/`); a bare `/manifest` is
   // usually a web app manifest, not media.
   const STREAM_EXT_RE = /\.(m3u8|mpd|flv|f4m)(\?|#|$)|\.isml?\/manifest(\(|\?|#|$)|^(rtmps?|rtsp|srt):/i;
@@ -404,7 +405,12 @@
       .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
       .replace(/&amp;/g, '&');
     for (const m of unescaped.matchAll(STREAM_RE)) {
-      const url = abs(m[0].startsWith('//') ? location.protocol + m[0] : m[0], base);
+      let found = m[0];
+      // A manifest passed to a player page (`embed?src=https://cdn/x.m3u8`, maybe percent-encoded)
+      // matches as the player's URL; the stream is the parameter.
+      const nested = found.match(/[?&][^=&]*=((?:https?(?::|%3A))?(?:\/\/|%2F%2F).*)$/i);
+      if (nested) { try { found = decodeURIComponent(nested[1]); } catch { found = nested[1]; } }
+      const url = abs(found.startsWith('//') ? location.protocol + found : found, base);
       // Scripts are full of chat/analytics sockets; keep only ones that look like media.
       if (url && /^wss?:/i.test(url) && !MEDIA_WS_RE.test(url)) continue;
       if (url) urls.push(url);

@@ -34,6 +34,26 @@ public class SidecarClient
         => (config.SidecarUrl ?? string.Empty).Trim().TrimEnd('/') + path;
 
     /// <summary>
+    /// Builds the sidecar URL for a request, rejecting a sidecar URL that isn't a full http(s)
+    /// address: "localhost:8899" parses as a URI with the scheme "localhost", and an empty one as a
+    /// relative URI, and HttpClient throws exceptions for those that the settings page can't show.
+    /// </summary>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="path">The path, starting with a slash.</param>
+    /// <returns>The absolute URI.</returns>
+    /// <exception cref="HttpRequestException">The sidecar URL is not a full http(s) address.</exception>
+    public static Uri RequestUri(PluginConfiguration config, string path)
+    {
+        if (Uri.TryCreate(UrlFor(config, path), UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            return uri;
+        }
+
+        throw new HttpRequestException($"The sidecar URL \"{config.SidecarUrl}\" is not a full address; use one like http://127.0.0.1:8899.");
+    }
+
+    /// <summary>
     /// The station list in the sidecar's JSON shape (camelCase, logo null when empty).
     /// </summary>
     /// <param name="stations">The stations.</param>
@@ -74,7 +94,7 @@ public class SidecarClient
     /// <returns>A task.</returns>
     public async Task PushStationsAsync(PluginConfiguration config, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, UrlFor(config, "/api/stations"))
+        using var request = new HttpRequestMessage(HttpMethod.Put, RequestUri(config, "/api/stations"))
         {
             Content = JsonContent.Create(ToSidecarStations(config.Stations), options: JsonOptions),
         };
@@ -89,7 +109,7 @@ public class SidecarClient
     /// <returns>A task.</returns>
     public async Task PushSportsAsync(PluginConfiguration config, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, UrlFor(config, "/api/sports"))
+        using var request = new HttpRequestMessage(HttpMethod.Put, RequestUri(config, "/api/sports"))
         {
             Content = JsonContent.Create(ToSidecarSports(config), options: JsonOptions),
         };
@@ -104,7 +124,7 @@ public class SidecarClient
     /// <returns>The sidecar's sports state.</returns>
     public async Task<JsonElement> SportsAsync(PluginConfiguration config, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, UrlFor(config, "/api/sports"));
+        using var request = new HttpRequestMessage(HttpMethod.Get, RequestUri(config, "/api/sports"));
         return await SendAsync(config, request, cancellationToken, TimeSpan.FromSeconds(45)).ConfigureAwait(false);
     }
 
@@ -117,7 +137,7 @@ public class SidecarClient
     /// <returns>The sidecar's test result (ok, via, url or error, details).</returns>
     public async Task<JsonElement> TestAsync(PluginConfiguration config, string stationId, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, UrlFor(config, "/api/stations/" + Uri.EscapeDataString(stationId) + "/test"));
+        using var request = new HttpRequestMessage(HttpMethod.Post, RequestUri(config, "/api/stations/" + Uri.EscapeDataString(stationId) + "/test"));
         return await SendAsync(config, request, cancellationToken, TimeSpan.FromMinutes(3)).ConfigureAwait(false);
     }
 
@@ -129,15 +149,18 @@ public class SidecarClient
     /// <returns>The sidecar's status array.</returns>
     public async Task<JsonElement> StatusAsync(PluginConfiguration config, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, UrlFor(config, "/api/status"));
+        using var request = new HttpRequestMessage(HttpMethod.Get, RequestUri(config, "/api/status"));
         return await SendAsync(config, request, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<JsonElement> SendAsync(PluginConfiguration config, HttpRequestMessage request, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
-        if (!string.IsNullOrEmpty(config.ApiKey))
+        // Trimmed: a key pasted with a trailing space or newline would otherwise be rejected (or,
+        // with Headers.Add, throw before the request is sent).
+        var apiKey = config.ApiKey?.Trim();
+        if (!string.IsNullOrEmpty(apiKey))
         {
-            request.Headers.Add("X-Api-Key", config.ApiKey);
+            request.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -151,8 +174,16 @@ public class SidecarClient
             throw new SidecarException((int)response.StatusCode, ErrorMessage(body) ?? response.ReasonPhrase ?? "request failed");
         }
 
-        using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "null" : body);
-        return doc.RootElement.Clone();
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "null" : body);
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            // Something else answered: a web page on that port, or a reverse proxy's login page.
+            throw new HttpRequestException($"{request.RequestUri} did not answer like the Local Broadcast sidecar (the response is not JSON). Check the sidecar URL.");
+        }
     }
 
     private static string? ErrorMessage(string body)

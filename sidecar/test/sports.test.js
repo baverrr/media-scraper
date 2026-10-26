@@ -4,7 +4,7 @@ import http from 'node:http';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseSchedule, matchEvents, isOnAir, SportsSchedule, LEAD_MS } from '../src/sports.js';
+import { parseSchedule, matchEvents, isOnAir, SportsSchedule, LEAD_MS, OVERRUN_MS } from '../src/sports.js';
 import { buildXmltv, sportsChannel } from '../src/guide.js';
 import { createApp } from '../src/app.js';
 import { StationStore } from '../src/stations.js';
@@ -153,6 +153,61 @@ test('app: Local Sports channel leads the playlist and plays the station airing 
     }
   } finally {
     cdn.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('schedule: changing teams mid-fetch discards the old teams\' games', async () => {
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const fetched = [];
+  const schedule = new SportsSchedule({
+    teams: [{ league: 'nfl', team: 'den', name: 'Broncos' }],
+    fetchImpl: async url => {
+      fetched.push(url);
+      if (url.includes('football/nfl')) await gate;
+      return { ok: true, json: async () => (url.includes('football/nfl') ? BRONCOS : { events: [] }) };
+    },
+  });
+  const first = schedule.events();
+  schedule.setTeams([{ league: 'nba', team: 'den', name: 'Nuggets' }]);
+  release();
+  assert.deepEqual(await first, []); // re-fetched for the new teams, not the Broncos' games
+  assert.deepEqual(await schedule.events(), []);
+  assert.ok(fetched.some(u => u.includes('basketball/nba')));
+});
+
+test('a game cached as in progress goes off the air once it has overrun by a lot', () => {
+  const ev = { state: 'in', start: 0, end: 3 * 3_600_000 };
+  assert.equal(isOnAir(ev, ev.end + 60 * 60_000), true); // overtime
+  assert.equal(isOnAir(ev, ev.end + OVERRUN_MS), false); // ESPN unreachable since: stale
+});
+
+test('app: a station airing two games at once is still one channel', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'lb-sports-'));
+  try {
+    await mkdir(path.join(dir, 'markets'));
+    await writeFile(path.join(dir, 'markets', 'den.json'), JSON.stringify({
+      name: 'Denver', teams: [{ league: 'nba', team: 'den' }, { league: 'nhl', team: 'col' }],
+      stations: STATIONS.map(s => ({ ...s, url: `https://${s.id}.example/live` })),
+    }));
+    const store = await new StationStore({ dataDir: path.join(dir, 'data'), marketsDir: path.join(dir, 'markets'), market: 'den' }).load();
+    const kcnc = store.get('kcnc');
+    const game = id => ({ station: kcnc, event: { id, title: id, team: id, start: 0, end: 1, broadcasts: [] } });
+    const sports = { onAirNow: async () => [game('nba:1'), game('nhl:2')], between: async () => [], setTeams() {} };
+    const resolved = [];
+    const app = createApp({ store, resolver: { async resolve(s) { resolved.push(s.id); return { url: 'https://x/y.m3u8', type: 'hls', headers: {} }; } }, sports, log: {} });
+    const server = http.createServer(app.handler);
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    try {
+      const m3u = await (await fetch(`http://127.0.0.1:${server.address().port}/playlist.m3u`)).text();
+      assert.deepEqual([...m3u.matchAll(/tvg-id="([^"]+)"/g)].map(x => x[1]), ['local-sports', 'kcnc', 'kusa', 'ktvd']);
+      assert.deepEqual(await app.warmSports(), ['kcnc']);
+      assert.deepEqual(resolved, ['kcnc']);
+    } finally {
+      server.close();
+    }
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

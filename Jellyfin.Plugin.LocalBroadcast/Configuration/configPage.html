@@ -128,8 +128,14 @@
 
                 function $(id) { return page.querySelector('#' + id); }
 
+                // Station ids must start with a letter or digit (the sidecar rejects "_test").
                 function slug(text) {
-                    return String(text || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+                    return String(text || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '').slice(0, 64);
+                }
+
+                // The same check the sidecar makes, so one bad URL can't get the whole station list rejected.
+                function isHttpUrl(text) {
+                    try { return /^https?:$/.test(new URL(text).protocol); } catch (e) { return false; }
                 }
 
                 function api(type, path) {
@@ -246,7 +252,7 @@
                         if (next.length) lines.push(next.map(fmt).join('\n'));
                         setLine($('lbGames'), lines.join('\n'), null);
                         render();
-                    });
+                    }, function () { setLine($('lbGames'), 'Could not get the local games.', false); });
                 }
 
                 function syncText(s) {
@@ -292,6 +298,9 @@
                         render();
                         // The server pushes the changes to the sidecar after saving.
                         setTimeout(refreshStatus, 1500);
+                    }, function () {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Saving the settings failed. Reload the page and try again.');
                     });
                 }
 
@@ -344,7 +353,12 @@
 
                 $('lbSidecarForm').addEventListener('submit', function (e) {
                     e.preventDefault();
-                    config.SidecarUrl = $('lbSidecarUrl').value.trim().replace(/\/+$/, '');
+                    var sidecarUrl = $('lbSidecarUrl').value.trim().replace(/\/+$/, '');
+                    if (!isHttpUrl(sidecarUrl)) {
+                        Dashboard.alert('Enter the sidecar URL in full, like http://127.0.0.1:8899');
+                        return false;
+                    }
+                    config.SidecarUrl = sidecarUrl;
                     config.ApiKey = $('lbApiKey').value.trim();
                     config.ManageLiveTv = $('lbManageLiveTv').checked;
                     save();
@@ -397,7 +411,7 @@
                     e.preventDefault();
                     var url = $('lbUrl').value.trim();
                     var streamUrl = $('lbStreamUrl').value.trim();
-                    if (!/^https?:\/\//i.test(url) || (streamUrl && !/^https?:\/\//i.test(streamUrl))) {
+                    if (!isHttpUrl(url) || (streamUrl && !isHttpUrl(streamUrl))) {
                         Dashboard.alert('Enter full URLs starting with http:// or https://');
                         return false;
                     }

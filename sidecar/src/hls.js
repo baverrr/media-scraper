@@ -88,7 +88,7 @@ export function renditionUrls(text, baseUrl) {
 
 // Tags a master playlist may carry. Anything else is dropped: ffmpeg 7 refuses a master that also
 // has media-playlist tags (Uplynk's masters carry #EXT-X-START and vendor #UPLYNK-* lines).
-const MASTER_TAGS = /^#(EXTM3U|EXT-X-VERSION|EXT-X-INDEPENDENT-SEGMENTS|EXT-X-MEDIA|EXT-X-STREAM-INF|EXT-X-SESSION-DATA|EXT-X-SESSION-KEY)(:|$)/i;
+const MASTER_TAGS = /^#(EXTM3U|EXT-X-VERSION|EXT-X-INDEPENDENT-SEGMENTS|EXT-X-MEDIA|EXT-X-STREAM-INF|EXT-X-SESSION-DATA)(:|$)/i;
 
 // Master playlist reduced to the chosen variant, with its URI replaced by `variantUrl` and the
 // n-th rendition URI by `renditionUrl(n)`. These are stable sidecar URLs, so a re-resolved
@@ -108,6 +108,10 @@ export function rewriteMaster(text, { maxHeight = 1080, variantUrl, renditionUrl
     if (drop.has(i)) continue;
     const line = lines[i];
     if (line.startsWith('#') && !MASTER_TAGS.test(line)) continue;
+    // Session keys and session data files are optional hints; their URIs are relative to the
+    // upstream master, so kept as they are they'd point at the sidecar. (Media playlists carry
+    // the keys players actually use.)
+    if (/^#EXT-X-SESSION-DATA:/i.test(line) && /URI="/.test(line)) continue;
     if (/^#EXT-X-MEDIA:/i.test(line) && /URI="/.test(line)) {
       const n = rendition++;
       out.push(line.replace(/URI="[^"]*"/, `URI="${renditionUrl(n)}"`));

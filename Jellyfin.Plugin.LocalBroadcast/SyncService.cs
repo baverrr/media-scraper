@@ -76,10 +76,12 @@ public class SyncService : IHostedService, IDisposable
     /// <returns>The result.</returns>
     public async Task<SyncResult> SyncAsync(bool refreshGuide, CancellationToken cancellationToken)
     {
-        var config = Plugin.Instance?.Configuration ?? throw new InvalidOperationException("Plugin not loaded");
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Read the settings once the lock is held: SemaphoreSlim isn't first-come first-served,
+            // so a sync queued with older settings could otherwise run last and push them.
+            var config = Plugin.Instance?.Configuration ?? throw new InvalidOperationException("Plugin not loaded");
             var result = new SyncResult { Time = DateTime.UtcNow };
             var stationsJson = JsonSerializer.Serialize(SidecarClient.ToSidecarStations(config.Stations), SidecarClient.JsonOptions)
                 + JsonSerializer.Serialize(SidecarClient.ToSidecarSports(config), SidecarClient.JsonOptions);
