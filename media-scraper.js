@@ -14,14 +14,18 @@
  *
  * What it finds:
  *   - <video>/<audio> elements (incl. open shadow DOM and same-origin iframes), with
- *     live detection via duration === Infinity / growing seekable range
- *   - HLS (.m3u8), DASH (.mpd), FLV, RTMP/RTSP/WebRTC-ish URLs from network resource
- *     timings, <source> tags, attributes, inline scripts and JSON blobs
+ *     live detection via duration === Infinity / growing seekable range, and WebRTC /
+ *     MediaStream players (srcObject)
+ *   - HLS (.m3u8), DASH (.mpd), FLV, RTMP/RTSP/media WebSocket URLs from network requests
+ *     (observed continuously, so a full resource timing buffer doesn't hide them),
+ *     <source> tags, attributes, inline scripts and JSON blobs
  *   - Embedded third-party players (YouTube, Twitch, Kick, Vimeo, Facebook, etc.)
- *   - Player library instances (video.js, JW Player, hls.js, dash.js, Shaka, Clappr, Plyr, Flowplayer)
+ *   - Player library instances (video.js, JW Player, hls.js, dash.js, Shaka, Clappr, Plyr, Flowplayer);
+ *     hls.js, dash.js and Shaka are hooked on load so each MSE <video> is paired with its manifest
  *
  * Limitations: cross-origin iframes can't be inspected (only their src is reported), closed
- * shadow roots are invisible, and manifest probing is subject to CORS.
+ * shadow roots are invisible, manifest probing is subject to CORS, and player instances
+ * created before this script loads (or from a bundled, non-global library) can't be paired.
  */
 (function (global) {
   'use strict';
@@ -54,6 +58,14 @@
 
   let last = [];
   let watching = null;
+
+  // Player instances captured by hooking library prototypes/factories (see hookLibraries).
+  const captured = new Set();
+  // Stream URLs seen by a PerformanceObserver. Unlike performance.getEntries(), an observer keeps
+  // receiving entries after the 250-entry resource timing buffer fills, which live pages do quickly
+  // by re-fetching their playlist every few seconds.
+  const networkSeen = new Set();
+  const observedWindows = new WeakSet();
 
   // ---------- helpers ----------
 
@@ -116,6 +128,69 @@
     return r.width > 1 && r.height > 1;
   }
 
+  function windowsOf() {
+    const out = [];
+    for (const r of roots()) if (r.defaultView) out.push(r.defaultView);
+    return out;
+  }
+
+  // Wrap a method so every instance that calls it is captured. Idempotent per function.
+  function captureOn(obj, method, onCall = inst => captured.add(inst)) {
+    const orig = obj && obj[method];
+    if (typeof orig !== 'function' || orig.__msHook) return;
+    const wrapped = function () { try { onCall(this); } catch {} return orig.apply(this, arguments); };
+    Object.defineProperty(wrapped, '__msHook', { value: true });
+    obj[method] = wrapped;
+  }
+
+  // hls.js, dash.js and Shaka instances are rarely reachable from window or the <video>, so hook
+  // the libraries to catch instances created or (re)loaded from now on.
+  function hookLibraries(win) {
+    try {
+      if (win.Hls && win.Hls.prototype) {
+        captureOn(win.Hls.prototype, 'loadSource');
+        captureOn(win.Hls.prototype, 'attachMedia');
+        captureOn(win.Hls.prototype, 'destroy', inst => captured.delete(inst));
+      }
+    } catch {}
+    try {
+      if (win.shaka && win.shaka.Player && win.shaka.Player.prototype) {
+        captureOn(win.shaka.Player.prototype, 'load');
+        captureOn(win.shaka.Player.prototype, 'attach');
+        captureOn(win.shaka.Player.prototype, 'destroy', inst => captured.delete(inst));
+      }
+    } catch {}
+    try {
+      // dash.js players come from a factory: dashjs.MediaPlayer().create().
+      const dash = win.dashjs;
+      if (dash && typeof dash.MediaPlayer === 'function' && !dash.MediaPlayer.__msHook) {
+        const origFactory = dash.MediaPlayer;
+        const factory = function () {
+          const f = origFactory.apply(this, arguments);
+          const create = f && f.create;
+          if (typeof create === 'function') {
+            f.create = function () { const p = create.apply(this, arguments); captured.add(p); return p; };
+          }
+          return f;
+        };
+        Object.assign(factory, origFactory);
+        Object.defineProperty(factory, '__msHook', { value: true });
+        dash.MediaPlayer = factory;
+      }
+    } catch {}
+  }
+
+  function observeNetwork(win) {
+    if (!win || observedWindows.has(win)) return;
+    observedWindows.add(win);
+    try {
+      const po = new win.PerformanceObserver(list => {
+        for (const e of list.getEntries()) if (STREAM_EXT_RE.test(e.name)) networkSeen.add(e.name);
+      });
+      po.observe({ type: 'resource', buffered: true });
+    } catch {}
+  }
+
   // ---------- collectors ----------
 
   function collectMediaElements() {
@@ -131,13 +206,21 @@
       // MSE players (hls.js, dash.js, …) often give live streams a finite, growing duration,
       // so a finite duration only means VOD for direct sources.
       const mse = String(sources[0] || '').startsWith('blob:');
+      // srcObject players have no URL: a MediaStream (WebRTC, camera, canvas capture) is always
+      // live; a MediaSource set directly (Safari) is an MSE player like a blob: URL.
+      const obj = el.srcObject;
+      const stream = obj && typeof obj.getTracks === 'function' ? obj : null;
+      let type = sources[0] ? typeOf(sources[0]) : 'none';
+      if (stream) type = 'mediastream';
+      else if (obj) type = 'mse-blob';
       out.push({
         kind: el.tagName.toLowerCase(),
         source: 'element',
         url: sources[0] || null,
         alternates: sources.slice(1),
-        type: sources[0] ? typeOf(sources[0]) : 'none',
-        live: live ? true : (!mse && el.duration > 0 && Number.isFinite(el.duration) ? false : null),
+        type,
+        live: live || stream ? true : (!mse && !obj && el.duration > 0 && Number.isFinite(el.duration) ? false : null),
+        streamTracks: stream ? stream.getTracks().map(t => ({ kind: t.kind, label: t.label, state: t.readyState })) : undefined,
         playing: !el.paused && !el.ended && el.readyState > 2,
         muted: el.muted,
         size: el.videoWidth ? `${el.videoWidth}x${el.videoHeight}` : null,
@@ -178,18 +261,12 @@
   }
 
   function collectNetwork() {
-    const out = [];
-    const entries = [];
-    for (const r of roots()) {
-      const win = r.defaultView;
-      try { if (win && win.performance) entries.push(...win.performance.getEntriesByType('resource')); } catch {}
+    const urls = new Set(networkSeen);
+    for (const win of windowsOf()) {
+      observeNetwork(win); // start observing same-origin iframes found since the last scan
+      try { for (const e of win.performance.getEntriesByType('resource')) if (STREAM_EXT_RE.test(e.name)) urls.add(e.name); } catch {}
     }
-    for (const e of entries) {
-      if (STREAM_EXT_RE.test(e.name)) {
-        out.push({ kind: 'stream', source: 'network', url: e.name, type: typeOf(e.name), live: null });
-      }
-    }
-    return out;
+    return [...urls].map(url => ({ kind: 'stream', source: 'network', url, type: typeOf(url), live: null }));
   }
 
   function collectFromMarkup() {
@@ -212,6 +289,8 @@
         .replace(/&amp;/g, '&');
       for (const m of unescaped.matchAll(STREAM_RE)) {
         const url = abs(m[0].startsWith('//') ? location.protocol + m[0] : m[0]);
+        // Scripts are full of chat/analytics sockets; keep only ones that look like media.
+        if (url && /^wss?:/i.test(url) && !MEDIA_WS_RE.test(url)) continue;
         if (url) out.push({ kind: 'stream', source: 'markup', url, type: typeOf(url), live: null });
       }
     }
@@ -221,15 +300,18 @@
   function collectLibraries() {
     const out = [];
     const w = global;
+    // `media` is the <video>/<audio> the player drives; scan() uses it to pair MSE elements with
+    // their manifest.
     const push = (lib, url, extra = {}) =>
       out.push({ kind: 'player', source: 'library', library: lib, url: url || null, type: url ? typeOf(url) : 'unknown', live: null, ...extra });
+    const mediaIn = el => (el && el.querySelector ? el.querySelector('video, audio') : null);
 
     try {
       if (w.videojs && w.videojs.getPlayers) {
         for (const p of Object.values(w.videojs.getPlayers())) {
           if (!p) continue;
           const live = p.liveTracker ? p.liveTracker.isLive() : p.duration() === Infinity;
-          push('video.js', p.currentSrc(), { live, element: describe(p.el && p.el()) });
+          push('video.js', p.currentSrc(), { live, element: describe(p.el && p.el()), media: mediaIn(p.el && p.el()) });
         }
       }
     } catch {}
@@ -243,13 +325,16 @@
           push('JW Player', item.file || (item.sources && item.sources[0] && item.sources[0].file), {
             live: p.getDuration && p.getDuration() === Infinity ? true : null,
             title: item.title,
+            media: mediaIn(p.getContainer && p.getContainer()),
           });
         }
       }
     } catch {}
 
     try {
-      for (const p of (w.Plyr && w.Plyr.instances) || []) push('Plyr', p.source, { element: describe(p.elements && p.elements.container) });
+      for (const p of (w.Plyr && w.Plyr.instances) || []) {
+        push('Plyr', p.source, { element: describe(p.elements && p.elements.container), media: p.media || null });
+      }
     } catch {}
 
     try {
@@ -258,23 +343,31 @@
       }
     } catch {}
 
-    // hls.js / dash.js / Shaka / Clappr instances usually aren't registered globally; scan window
-    // properties and media-element expandos for objects that look like them.
+    // hls.js / dash.js / Shaka / Clappr instances usually aren't registered globally: use the ones
+    // captured by hookLibraries(), plus window properties and media-element expandos that look like them.
     const looksHls = o => o && typeof o === 'object' && typeof o.loadSource === 'function' && 'url' in o;
     const looksDash = o => o && typeof o === 'object' && typeof o.getSource === 'function' && typeof o.isDynamic === 'function';
     const looksShaka = o => o && typeof o === 'object' && typeof o.getAssetUri === 'function' && typeof o.isLive === 'function';
     const looksClappr = o => o && typeof o === 'object' && o.options && typeof o.getPlugin === 'function' && 'core' in o;
-    const candidates = new Set();
+    const candidates = new Set(captured);
     try { for (const k of Object.keys(w)) { try { candidates.add(w[k]); } catch {} } } catch {}
     for (const v of queryAll('video, audio')) {
       for (const k of Object.keys(v)) { try { candidates.add(v[k]); } catch {} }
     }
+    const tryGet = fn => { try { return fn(); } catch { return null; } };
     for (const o of candidates) {
       try {
-        if (looksHls(o)) push('hls.js', o.url, { live: o.levels && o.levels[o.currentLevel] && o.levels[o.currentLevel].details ? o.levels[o.currentLevel].details.live : null });
-        else if (looksDash(o)) push('dash.js', o.getSource && String(o.getSource()), { live: o.isDynamic() });
-        else if (looksShaka(o)) push('Shaka', o.getAssetUri(), { live: o.isLive() });
-        else if (looksClappr(o)) push('Clappr', o.options.source, {});
+        if (looksHls(o)) {
+          if (!o.url && !o.media) continue; // created but never used, or destroyed
+          const lvl = o.levels && o.levels[o.currentLevel];
+          push('hls.js', o.url, { live: lvl && lvl.details ? lvl.details.live : null, media: o.media || null });
+        } else if (looksDash(o)) {
+          push('dash.js', tryGet(() => String(o.getSource())), { live: tryGet(() => o.isDynamic()), media: tryGet(() => o.getVideoElement()) });
+        } else if (looksShaka(o)) {
+          push('Shaka', o.getAssetUri(), { live: o.isLive(), media: tryGet(() => o.getMediaElement()) });
+        } else if (looksClappr(o)) {
+          push('Clappr', o.options.source, { media: mediaIn(tryGet(() => o.core.el)) });
+        }
       } catch {}
     }
     return out;
@@ -348,6 +441,7 @@
 
   async function scan(opts = {}) {
     const { probe: doProbe = true, liveOnly = false, quiet = false, record = true } = opts;
+    for (const win of windowsOf()) { hookLibraries(win); observeNetwork(win); }
     let items = dedupe([
       ...collectMediaElements(),
       ...collectLibraries(),
@@ -358,13 +452,36 @@
 
     if (doProbe) await Promise.all(items.filter(i => i.live === null).map(i => probe(i)));
 
-    // An MSE blob element plus a probed manifest is the common live setup: carry live status over.
-    const liveManifest = items.find(i => (i.type === 'hls' || i.type === 'dash') && i.live === true);
-    for (const i of items) {
-      if (i.type === 'mse-blob' && i.live === null && liveManifest) {
-        i.live = true;
-        i.manifest = liveManifest.url;
-      }
+    // Fold HLS variant playlists into their master instead of listing each quality separately.
+    const variantOf = new Map();
+    for (const m of items) for (const v of m.variants || []) variantOf.set(v.url, m);
+    items = items.filter(i => {
+      const master = variantOf.get(i.url);
+      if (!master || i === master) return true;
+      if (i.foundBy.some(s => s === 'element' || s === 'library')) return true;
+      for (const s of i.foundBy) if (!master.foundBy.includes(s)) master.foundBy.push(s);
+      return false;
+    });
+
+    // MSE players play a blob:, so link each to the manifest of the library instance driving it.
+    const mseEls = items.filter(i => i.node && i.type === 'mse-blob');
+    const players = items.filter(i => i.media);
+    const claimed = new Set();
+    for (const el of mseEls) {
+      const p = players.find(x => x.media === el.node);
+      if (!p) continue;
+      el.library = p.library;
+      if (p.url) { el.manifest = p.url; claimed.add(p.url); }
+      if (el.live === null && typeof p.live === 'boolean') el.live = p.live;
+    }
+    // Without a captured instance, only guess when it's unambiguous: one unpaired MSE element and
+    // one unclaimed live manifest.
+    const unpaired = mseEls.filter(i => !i.manifest);
+    const liveManifests = items.filter(i => (i.type === 'hls' || i.type === 'dash') && i.live === true && !claimed.has(i.url));
+    if (unpaired.length === 1 && liveManifests.length === 1 && unpaired[0].live === null) {
+      unpaired[0].live = true;
+      unpaired[0].manifest = liveManifests[0].url;
+      unpaired[0].manifestGuessed = true;
     }
 
     if (liveOnly) items = items.filter(i => i.live === true);
@@ -391,79 +508,135 @@
 
   function watch(callback = item => console.log('[MediaScraper] new stream:', item)) {
     if (watching) return;
-    const seen = new Set(last.map(i => i.url));
-    const report = (url, via) => {
-      const full = abs(url);
+    const seen = new Set();
+    // Known HLS variant playlists count as seen, so a master's qualities aren't reported one by one.
+    const markSeen = item => {
+      seen.add(item.url);
+      for (const v of item.variants || []) seen.add(v.url);
+    };
+    last.forEach(markSeen);
+    const report = (url, via, base) => {
+      const full = abs(url, base);
       if (!full || seen.has(full)) return;
       if (!STREAM_EXT_RE.test(full) && !(via === 'websocket' && MEDIA_WS_RE.test(full))) return;
       seen.add(full);
       const item = { kind: 'stream', source: via, url: full, type: typeOf(full), live: null, foundBy: [via] };
-      probe(item).finally(() => callback(item));
+      probe(item).finally(() => { markSeen(item); callback(item); });
     };
 
-    const origFetch = global.fetch;
-    const origOpen = XMLHttpRequest.prototype.open;
-    const origWS = global.WebSocket;
-    global.fetch = function (input, init) {
-      // input may be a string, a URL object, or a Request.
-      try { report(input && typeof input === 'object' && 'url' in input ? input.url : String(input), 'fetch'); } catch {}
-      return origFetch.apply(this, arguments);
-    };
-    XMLHttpRequest.prototype.open = function (method, url) {
-      try { report(String(url), 'xhr'); } catch {}
-      return origOpen.apply(this, arguments);
-    };
-    // A Proxy keeps WebSocket.OPEN etc., the prototype and instanceof working for the page.
-    global.WebSocket = new Proxy(origWS, {
-      construct(target, args, newTarget) {
-        try { report(String(args[0]), 'websocket'); } catch {}
-        return Reflect.construct(target, args, newTarget === global.WebSocket ? target : newTarget);
-      },
-    });
+    const restores = [];
+    const hookedWindows = new WeakSet();
+    const observedRoots = new WeakSet();
+    const iframesWithListener = new WeakSet();
 
-    const po = new PerformanceObserver(list => list.getEntries().forEach(e => report(e.name, 'network')));
-    po.observe({ type: 'resource', buffered: false });
+    // Hook fetch/XHR/WebSocket/resource timing in one window (the page or a same-origin iframe).
+    function hookWindow(win) {
+      if (hookedWindows.has(win)) return;
+      hookedWindows.add(win);
+      const base = () => { try { return win.location.href; } catch { return undefined; } };
+      try {
+        const origFetch = win.fetch;
+        win.fetch = function (input, init) {
+          // input may be a string, a URL object, or a Request.
+          try { report(input && typeof input === 'object' && 'url' in input ? input.url : String(input), 'fetch', base()); } catch {}
+          return origFetch.apply(this, arguments);
+        };
+        restores.push(() => { win.fetch = origFetch; });
+      } catch {}
+      try {
+        const proto = win.XMLHttpRequest.prototype;
+        const origOpen = proto.open;
+        proto.open = function (method, url) {
+          try { report(String(url), 'xhr', base()); } catch {}
+          return origOpen.apply(this, arguments);
+        };
+        restores.push(() => { proto.open = origOpen; });
+      } catch {}
+      try {
+        const origWS = win.WebSocket;
+        // A Proxy keeps WebSocket.OPEN etc., the prototype and instanceof working for the page.
+        const proxy = new Proxy(origWS, {
+          construct(target, args, newTarget) {
+            try { report(String(args[0]), 'websocket', base()); } catch {}
+            return Reflect.construct(target, args, newTarget === proxy ? target : newTarget);
+          },
+        });
+        win.WebSocket = proxy;
+        restores.push(() => { win.WebSocket = origWS; });
+      } catch {}
+      try {
+        const po = new win.PerformanceObserver(list => list.getEntries().forEach(e => report(e.name, 'network')));
+        po.observe({ type: 'resource', buffered: false });
+        restores.push(() => po.disconnect());
+      } catch {}
+    }
 
     // Throttle, not debounce: pages with live chat change constantly, so a debounce never fires.
     let pending = false;
-    const mo = new MutationObserver(() => {
+    const schedule = () => {
       if (pending) return;
       pending = true;
       setTimeout(async () => {
         pending = false;
         if (!watching) return;
+        attachAll();
         for (const item of await scan({ quiet: true, probe: false, record: false })) {
           if (item.url && !seen.has(item.url)) { seen.add(item.url); callback(item); }
         }
       }, 500);
-    });
-    mo.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    };
+    const mo = new MutationObserver(schedule);
+    restores.push(() => mo.disconnect());
 
-    watching = { origFetch, origOpen, origWS, po, mo };
+    // Extend coverage to shadow roots and same-origin iframes that exist now; called again on every
+    // rescan so ones added later are picked up too.
+    function attachAll() {
+      for (const r of roots()) {
+        if (!observedRoots.has(r)) {
+          observedRoots.add(r);
+          mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+        }
+        if (r.defaultView) { hookWindow(r.defaultView); hookLibraries(r.defaultView); }
+        // An iframe's document is replaced when it loads, so rescan (and re-hook) on load.
+        for (const f of r.querySelectorAll('iframe, frame')) {
+          if (iframesWithListener.has(f)) continue;
+          iframesWithListener.add(f);
+          f.addEventListener('load', schedule);
+          restores.push(() => f.removeEventListener('load', schedule));
+        }
+      }
+    }
+
+    watching = { restores };
+    attachAll();
     console.log('[MediaScraper] watching for new streams... call MediaScraper.unwatch() to stop');
   }
 
   function unwatch() {
     if (!watching) return;
-    global.fetch = watching.origFetch;
-    XMLHttpRequest.prototype.open = watching.origOpen;
-    global.WebSocket = watching.origWS;
-    watching.po.disconnect();
-    watching.mo.disconnect();
+    for (const restore of watching.restores.reverse()) { try { restore(); } catch {} }
     watching = null;
   }
 
   function copy(items = last) {
-    const json = JSON.stringify(items.map(({ node, ...rest }) => rest), null, 2);
+    const json = JSON.stringify(toJSON(items), null, 2);
     if (typeof global.copy === 'function') global.copy(json); // DevTools helper
     else navigator.clipboard.writeText(json).catch(() => console.log(json));
     return json;
   }
 
-  // Strip DOM nodes so results survive page.evaluate() serialization.
+  // Strip DOM nodes so results survive page.evaluate() serialization, and keep an infinite
+  // duration (the clearest live signal) instead of letting JSON turn it into null.
   function toJSON(items = last) {
-    return items.map(({ node, ...rest }) => rest);
+    return items.map(({ node, media, ...rest }) => (
+      rest.duration === Infinity ? { ...rest, duration: 'Infinity' } : rest
+    ));
   }
+
+  // Start capturing as soon as the script loads, so instances and requests made before the first
+  // scan() are seen.
+  hookLibraries(global);
+  observeNetwork(global);
 
   global.MediaScraper = { scan, watch, unwatch, copy, toJSON, get results() { return last; } };
 })(typeof window !== 'undefined' ? window : globalThis);
