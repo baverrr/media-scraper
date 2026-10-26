@@ -173,7 +173,7 @@ export class Resolver {
           type: best.type || (best.probe.dash ? 'dash' : 'hls'),
           headers: best.headers,
           via: 'page',
-          expiresAt: expiryFromUrl(url),
+          expiresAt: expiryFromUrl(url, Date.now()),
           resolvedAt: Date.now(),
           tookMs: Date.now() - started,
         };
@@ -207,7 +207,7 @@ export class Resolver {
     const probe = await probeManifest(station.streamUrl, headers, { maxHeight: this.maxHeight });
     if (probe.ok && probe.live) {
       const url = probe.finalUrl || station.streamUrl;
-      return { url, type: probe.dash ? 'dash' : 'hls', headers, via: 'manual URL', expiresAt: expiryFromUrl(url), resolvedAt: Date.now(), tookMs: Date.now() - started };
+      return { url, type: probe.dash ? 'dash' : 'hls', headers, via: 'manual URL', expiresAt: expiryFromUrl(url, Date.now()), resolvedAt: Date.now(), tookMs: Date.now() - started };
     }
     if (this.ytDlp) {
       const viaYtDlp = await this.fromYtDlp(station.streamUrl).catch(() => null);
@@ -248,6 +248,6 @@ export class Resolver {
     const headers = {};
     const probe = await probeManifest(manifest, headers, { maxHeight: this.maxHeight });
     if (!probe.ok || probe.live !== true) return null;
-    return { url: probe.finalUrl || manifest, type: 'hls', headers, expiresAt: expiryFromUrl(manifest) };
+    return { url: probe.finalUrl || manifest, type: 'hls', headers, expiresAt: expiryFromUrl(manifest, Date.now()) };
   }
 }

@@ -104,3 +104,10 @@ test('reads Wowza and Edgecast token expiries', () => {
   assert.equal(expiryFromUrl('https://wz/a.m3u8?wowzatokenstarttime=1&wowzatokenendtime=1800000000&wowzatokenhash=h'), 1_800_000_000_000);
   assert.equal(expiryFromUrl('https://ec/a.m3u8?ec_expire=1800000000&ec_hash=h'), 1_800_000_000_000);
 });
+
+test('expiry: a past value does not hide a real one when now is given', () => {
+  const url = 'https://a/x.m3u8?e=1600000000&exp=1800000000';
+  assert.equal(expiryFromUrl(url), 1_600_000_000_000); // without now: the earliest
+  assert.equal(expiryFromUrl(url, 1_700_000_000_000), 1_800_000_000_000);
+  assert.equal(expiryFromUrl('https://a/x.m3u8?e=1600000000', 1_700_000_000_000), null);
+});

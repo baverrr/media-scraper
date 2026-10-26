@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { buildM3u, buildXmltv } from '../src/guide.js';
-import { normalizeStations, normalizeSports, loadMarket } from '../src/stations.js';
+import { normalizeStations, normalizeSports, loadMarket, StationStore } from '../src/stations.js';
 import { pickBest, mergeCandidates, scoreCandidate, pickHeaders } from '../src/pick.js';
 
 const stations = [
@@ -85,7 +85,27 @@ test('only replayable request headers are kept', () => {
 
 test('pick: a live HLS stream beats a paired DASH one (DASH is only redirected, without headers)', () => {
   const dash = { url: 'https://cdn/live/manifest.mpd', type: 'dash', paired: true, sources: ['network'], probe: { ok: true, live: true, master: true, dash: true } };
-  const hls = { url: 'https://cdn/live/master.m3u8', type: 'hls', sources: ['scan'], probe: { ok: true, live: true, master: false } };
+  const hls = { url: 'https://cdn/live/master.m3u8', type: 'hls', sources: ['network'], probe: { ok: true, live: true, master: false } };
   assert.equal(pickBest([dash, hls]).url, hls.url);
+  // An HLS stream only mentioned in the markup (a promo) doesn't beat the page's own DASH player.
+  const promo = { ...hls, url: 'https://cdn/promo/loop.m3u8', sources: ['scan'] };
+  assert.equal(pickBest([dash, promo]).url, dash.url);
   assert.equal(pickBest([dash]).url, dash.url); // still used when it's all there is
+});
+
+test('stations: an unknown market only matters while there are no saved settings', async () => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const dir = await mkdtemp(path.join(tmpdir(), 'lb-market-'));
+  const marketsDir = fileURLToPath(new URL('../markets', import.meta.url));
+  try {
+    await assert.rejects(new StationStore({ dataDir: dir, marketsDir, market: 'denvr' }).load(), /unknown market "denvr".*available: .*denver/);
+    await writeFile(path.join(dir, 'stations.json'), JSON.stringify([{ id: 'kusa', name: '9NEWS', url: 'https://www.9news.com/watch' }]));
+    await writeFile(path.join(dir, 'sports.json'), JSON.stringify({ enabled: false, teams: [] }));
+    const store = await new StationStore({ dataDir: dir, marketsDir, market: 'denvr' }).load();
+    assert.deepEqual(store.stations.map(s => s.id), ['kusa']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

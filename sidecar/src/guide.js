@@ -1,5 +1,7 @@
 // M3U playlist and XMLTV guide for Jellyfin's M3U tuner and XMLTV listings provider.
 
+import { LEAD_MS } from './sports.js';
+
 export const SPORTS_ID = 'local-sports';
 
 function xml(value) {
@@ -89,7 +91,9 @@ function programme(channelId, p) {
 function gameSlot(game, forSportsChannel) {
   const where = displayName(game.station);
   return {
-    start: game.event.start,
+    // Local Sports switches to the station LEAD_MS before the start (pre-game), so its guide does
+    // too; otherwise it says "No local game on the air" while showing one.
+    start: forSportsChannel ? game.event.start - LEAD_MS : game.event.start,
     stop: game.event.end,
     title: game.event.title,
     subTitle: forSportsChannel ? `On ${where}` : game.event.team,

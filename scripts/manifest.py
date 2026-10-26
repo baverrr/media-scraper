@@ -21,7 +21,9 @@ for line in open(build_yaml, encoding="utf-8"):
     if m:
         key, value = m.groups()
         meta[key] = "" if value == ">" else value.strip('"')
-    elif key and line.startswith("  ") and not line.lstrip().startswith("- "):
+    # Indented lines continue a folded block, bullets included ("  - Fix A"). Top-level lists
+    # (artifacts:) start at column 0 and never get here.
+    elif key and line.startswith("  "):
         meta[key] = (meta[key] + " " + line.strip()).strip()
 
 manifest = json.load(open(manifest_path, encoding="utf-8")) if os.path.exists(manifest_path) else []

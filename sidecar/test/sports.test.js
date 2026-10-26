@@ -81,6 +81,8 @@ test('guide: the game replaces the placeholder on its station and fills Local Sp
   const sports = xml.split('<programme').filter(p => p.includes('channel="local-sports"'));
   assert.ok(sports.some(p => p.includes('Kansas City Chiefs at Denver Broncos') && p.includes('On CBS Colorado (KCNC)')));
   assert.ok(sports.some(p => p.includes('No local game on the air')));
+  // Local Sports plays the station from 15 minutes before kick-off (21:25 UTC), and says so.
+  assert.ok(sports.some(p => p.includes('start="20261101211000 +0000"') && p.includes('Kansas City Chiefs at Denver Broncos')), 'Local Sports slot starts with the pre-game');
   // No overlaps on any channel.
   for (const ch of ['kcnc', 'local-sports', 'kusa']) {
     const spans = [...xml.matchAll(new RegExp(`start="(\\d+) \\+0000" stop="(\\d+) \\+0000" channel="${ch}"`, 'g'))].map(m => [m[1], m[2]]);

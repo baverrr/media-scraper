@@ -151,7 +151,10 @@ export function rewriteMedia(text, baseUrl, mediaUrl) {
 // Expiry of a signed URL, in epoch milliseconds, from common CDN conventions: `exp=` / `expires=`
 // query parameters (seconds or milliseconds), Wowza's `wowzatokenendtime=`, Edgecast/Edgio's
 // `ec_expire=` and Akamai `hdnts=...~exp=...` tokens.
-export function expiryFromUrl(url) {
+//
+// With `now`, values already past are skipped: `?e=<an old event timestamp>&exp=<real expiry>`
+// would otherwise return the old value, which callers then discard, losing the real one.
+export function expiryFromUrl(url, now = null) {
   let u;
   try { u = new URL(url); } catch { return null; }
   const values = [];
@@ -168,7 +171,8 @@ export function expiryFromUrl(url) {
   const times = values
     .map(v => Number(v))
     .filter(n => Number.isFinite(n) && n > 1e9)
-    .map(n => (n < 1e12 ? n * 1000 : n));
+    .map(n => (n < 1e12 ? n * 1000 : n))
+    .filter(t => now === null || t > now);
   return times.length ? Math.min(...times) : null;
 }
 

@@ -443,9 +443,14 @@
       // matches as the player's URL; the stream is the parameter.
       // Only when the stream's extension is in the parameter: a manifest whose own query carries
       // a URL (`master.m3u8?ref=https%3A%2F%2Fstation...`) is the stream itself.
-      const nested = found.match(/[?&][^=&]*=((?:https?(?::|%3A))?(?:\/\/|%2F%2F).*)$/i);
-      if (nested && !STREAM_IN_PATH_RE.test(found.slice(0, nested.index))) {
-        try { found = decodeURIComponent(nested[1]); } catch { found = nested[1]; }
+      // The parameter holding the stream, not just the first URL-valued one (`?poster=https://...`).
+      const q = found.search(/[?&][^=&]*=(?:https?(?::|%3A))?(?:\/\/|%2F%2F)/i);
+      if (q >= 0 && !STREAM_IN_PATH_RE.test(found.slice(0, q))) {
+        const params = found.slice(q + 1).split(/&(?=[^=&]*=)/);
+        const decode = v => { try { return decodeURIComponent(v); } catch { return v; } };
+        const value = params.map(p => decode(p.slice(p.indexOf('=') + 1)))
+          .find(v => /^(?:https?:)?\/\//i.test(v) && STREAM_IN_PATH_RE.test(v));
+        if (value) found = value;
       }
       const url = abs(found.startsWith('//') ? location.protocol + found : found, base);
       // Scripts are full of chat/analytics sockets; keep only ones that look like media.

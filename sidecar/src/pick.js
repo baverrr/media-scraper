@@ -22,10 +22,12 @@ export function scoreCandidate(c) {
   if (!c.probe || !c.probe.ok || c.probe.live !== true) return -Infinity;
   if (AD_RE.test(c.url)) return -Infinity;
   let score = 0;
-  // Any live HLS stream beats DASH: only HLS goes through the proxy (with the page's headers and
-  // re-resolving behind stable URLs); DASH is a bare redirect, without the Referer or cookies the
-  // CDN may want, and ffmpeg handles DASH live less reliably.
-  if (!c.probe.dash && c.type !== 'dash') score += 8;
+  // Live HLS the page actually used (its player's, or requested) beats DASH: only HLS goes through
+  // the proxy (with the page's headers, re-resolving behind stable URLs); DASH is a bare redirect,
+  // without the Referer or cookies the CDN may want, and ffmpeg handles DASH live less reliably.
+  // A live .m3u8 merely mentioned in the markup (a promo, a radar loop) doesn't get this.
+  const used = c.paired || (c.sources && c.sources.includes('network'));
+  if (!c.probe.dash && c.type !== 'dash' && used) score += 8;
   if (c.paired) score += 4;
   if (c.probe.master) score += 2;
   if (c.sources && c.sources.includes('network')) score += 1;

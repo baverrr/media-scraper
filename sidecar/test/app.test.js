@@ -299,3 +299,16 @@ test('cache: after a failed forced re-resolve, the rejected stream is not served
   assert.equal(cache.peek('a'), null);
   assert.equal(cache.status('a').state, 'failed');
 });
+
+test('cache: a failed Test (keepOnFailure) leaves a playing stream alone', async () => {
+  let fail = false;
+  const cache = new ResolutionCache({ resolve: async () => {
+    if (fail) throw new Error('bot check');
+    return { url: 'https://cdn.example/1.m3u8', type: 'hls' };
+  } });
+  await cache.get({ id: 'a' });
+  fail = true;
+  await assert.rejects(cache.get({ id: 'a' }, { force: true, keepOnFailure: true }), /bot check/);
+  assert.equal(cache.peek('a')?.url, 'https://cdn.example/1.m3u8');
+  assert.equal((await cache.get({ id: 'a' })).url, 'https://cdn.example/1.m3u8');
+});
