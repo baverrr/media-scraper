@@ -1,0 +1,15 @@
+{
+  "name": "local-broadcast-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Finds local TV stations' live streams with media-scraper.js in headless Chromium and serves them to Jellyfin as an M3U tuner with an XMLTV guide.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright": "1.64.0"
+  }
+}

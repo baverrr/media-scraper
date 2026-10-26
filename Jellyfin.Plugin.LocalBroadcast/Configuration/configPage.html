@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Local Broadcast</title>
+</head>
+<body>
+    <div id="LocalBroadcastConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select,emby-linkbutton">
+        <div data-role="content">
+            <div class="content-primary">
+                <h2 class="sectionTitle">Local Broadcast</h2>
+                <p>Local TV stations' free live streams, found on each station's website by the
+                    <b>local-broadcast sidecar</b> and shown in <b>Live TV</b>. Stations airing a local team's game
+                    come first, and the <b>Local Sports</b> channel always plays whichever station has the game.</p>
+
+                <h3 class="sectionTitle">Sidecar</h3>
+                <form id="lbSidecarForm">
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="lbSidecarUrl" label="Sidecar URL" required placeholder="http://127.0.0.1:8899" />
+                        <div class="fieldDescription">As Jellyfin reaches it. With the sidecar's compose file and Jellyfin on host networking: <code>http://127.0.0.1:8899</code>.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="password" id="lbApiKey" label="API key" autocomplete="off" />
+                        <div class="fieldDescription">The sidecar's <code>API_KEY</code>.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input is="emby-checkbox" type="checkbox" id="lbManageLiveTv" />
+                            <span>Add and maintain the Live TV tuner and guide</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Turn off to manage the M3U tuner (<code>/playlist.m3u</code>) and XMLTV guide (<code>/guide.xml</code>) yourself.</div>
+                    </div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
+                    <button is="emby-button" type="button" class="raised block emby-button" id="lbSync"><span>Sync now</span></button>
+                    <div id="lbSidecarStatus" class="fieldDescription" style="margin-top:.5em;" aria-live="polite"></div>
+                </form>
+
+                <h3 class="sectionTitle" style="margin-top:2em;">Local sports</h3>
+                <form id="lbSportsForm">
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input is="emby-checkbox" type="checkbox" id="lbSportsEnabled" />
+                            <span>Put stations airing local games first</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Uses each team's schedule and TV listings from ESPN. A game matches a station by network (a CBS game is on the CBS affiliate), call sign, name, or the station's sports aliases.
+                            The station's web stream may show its own programming instead when the network or league doesn't allow the game online.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="lbSportsChannel" label="Local Sports channel number" placeholder="1.1" />
+                    </div>
+                    <div id="lbTeams" class="paperList"></div>
+                    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:flex-end;margin-top:.5em;">
+                        <div class="selectContainer" style="flex:0 0 9em;margin:0;">
+                            <select is="emby-select" id="lbTeamLeague" label="League">
+                                <option value="nfl">NFL</option><option value="nba">NBA</option><option value="wnba">WNBA</option>
+                                <option value="nhl">NHL</option><option value="mlb">MLB</option><option value="mls">MLS</option>
+                                <option value="nwsl">NWSL</option><option value="ncaaf">College football</option>
+                                <option value="ncaam">Men's college basketball</option><option value="ncaaw">Women's college basketball</option>
+                            </select>
+                        </div>
+                        <div class="inputContainer" style="flex:0 0 8em;margin:0;">
+                            <input is="emby-input" type="text" id="lbTeamId" label="ESPN team" placeholder="den" />
+                        </div>
+                        <div class="inputContainer" style="flex:1 1 12em;margin:0;">
+                            <input is="emby-input" type="text" id="lbTeamName" label="Name" placeholder="Denver Broncos" />
+                        </div>
+                        <button is="emby-button" type="button" class="raised emby-button" id="lbAddTeam"><span>Add team</span></button>
+                    </div>
+                    <div class="fieldDescription">ESPN team: the abbreviation or id from the team's ESPN page URL (e.g. <code>den</code> in <code>/nfl/team/_/name/den</code>, <code>38</code> in <code>/college-football/team/_/id/38</code>).</div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button" style="margin-top:1em;"><span>Save sports settings</span></button>
+                    <div id="lbGames" class="fieldDescription" style="margin-top:.5em;white-space:pre-line;" aria-live="polite"></div>
+                </form>
+
+                <h3 class="sectionTitle" style="margin-top:2em;">Stations</h3>
+                <form id="lbStationForm">
+                    <input type="hidden" id="lbEditId" />
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="lbCallSign" label="Call sign" placeholder="KUSA" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="lbName" label="Name" required placeholder="9NEWS" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="lbChannel" label="Channel number" placeholder="9.1" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="lbNetwork" label="Network" placeholder="NBC" />
+                        <div class="fieldDescription">Also used to match local games broadcast on the network.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="url" id="lbUrl" label="Live-stream page URL" required placeholder="https://www.9news.com/watch" />
+                        <div class="fieldDescription">The station's web page with its live player. The sidecar opens it in a headless browser to find the stream.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="url" id="lbStreamUrl" label="Stream URL (optional)" />
+                        <div class="fieldDescription">Use this instead of scraping the page: a live <code>.m3u8</code>/<code>.mpd</code> URL that doesn't expire, or a page yt-dlp supports (e.g. the station's YouTube live). Only use streams you're allowed to watch.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="lbAliases" label="Sports aliases (optional)" placeholder="Altitude Sports" />
+                        <div class="fieldDescription">Other broadcaster names, comma separated, that mean a game airs on this station.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="url" id="lbLogo" label="Logo URL (optional)" />
+                    </div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button" id="lbSubmit"><span>Add station</span></button>
+                    <button is="emby-button" type="button" class="raised block emby-button hide" id="lbCancel"><span>Cancel edit</span></button>
+                </form>
+
+                <div id="lbList" class="paperList" style="margin-top:1em;"></div>
+                <p id="lbEmpty" class="fieldDescription">No stations.</p>
+
+                <h3 class="sectionTitle" style="margin-top:2em;">Market defaults</h3>
+                <div class="selectContainer">
+                    <select is="emby-select" id="lbMarket" label="Market"></select>
+                    <div class="fieldDescription">Bundled station lists and local teams. Missing your area? Add a file to <code>sidecar/markets/</code> in the project repository.</div>
+                </div>
+                <button is="emby-button" type="button" class="raised block emby-button" id="lbDefaults"><span>Load this market's stations and teams</span></button>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            (function () {
+                var pluginId = 'd0766040-c26a-4cc7-9c0b-c7064aa77001';
+                var page = document.querySelector('#LocalBroadcastConfigPage');
+                var config = { Stations: [], Teams: [] };
+                var status = {};
+                var airing = {};
+
+                function $(id) { return page.querySelector('#' + id); }
+
+                // Station ids must start with a letter or digit (the sidecar rejects "_test").
+                function slug(text) {
+                    return String(text || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '').slice(0, 64);
+                }
+
+                // The same check the sidecar makes, so one bad URL can't get the whole station list rejected.
+                function isHttpUrl(text) {
+                    try { return /^https?:$/.test(new URL(text).protocol); } catch (e) { return false; }
+                }
+
+                function api(type, path) {
+                    return ApiClient.ajax({ type: type, url: ApiClient.getUrl('LocalBroadcast/' + path), dataType: 'json' });
+                }
+
+                function label(s) {
+                    var name = s.Name || s.CallSign || s.Id;
+                    return (s.Channel ? s.Channel + '  ' : '') + name + (s.CallSign && s.CallSign !== name ? ' (' + s.CallSign + ')' : '');
+                }
+
+                // Messages are set with textContent: they can contain text from station websites and ESPN.
+                function setLine(el, text, ok) {
+                    el.textContent = text;
+                    el.style.color = ok === true ? '#4caf50' : ok === false ? '#f44336' : '';
+                }
+
+                function describeState(s) {
+                    var st = status[s.Id];
+                    if (!s.Enabled) return [s.Note ? 'Disabled: ' + s.Note : 'Disabled.', null];
+                    if (!st || st.state === 'idle') return ['Not resolved yet (resolves when first played).', null];
+                    if (st.state === 'resolving') return ['Resolving...', null];
+                    if (st.state === 'failed') return ['Last attempt failed: ' + st.error, false];
+                    return ['Stream ready (' + st.type + ' via ' + st.via + ').', true];
+                }
+
+                function iconButton(icon, title, onClick) {
+                    var b = document.createElement('button');
+                    b.type = 'button';
+                    b.setAttribute('is', 'paper-icon-button-light');
+                    b.className = 'paper-icon-button-light';
+                    b.title = title;
+                    b.innerHTML = '<span class="material-icons ' + icon + '" aria-hidden="true"></span>';
+                    b.addEventListener('click', onClick);
+                    return b;
+                }
+
+                function textRow(lines, buttons, dim) {
+                    var row = document.createElement('div');
+                    row.className = 'listItem listItem-border';
+                    if (dim) row.style.opacity = '0.6';
+                    var body = document.createElement('div');
+                    body.className = 'listItemBody ' + (lines.length > 2 ? 'three-line' : 'two-line');
+                    var nodes = lines.map(function (l, i) {
+                        var el = document.createElement(i === 0 ? 'h3' : 'div');
+                        el.className = 'listItemBodyText' + (i ? ' secondary' : '');
+                        if (i === 1) el.style.wordBreak = 'break-all';
+                        el.textContent = l;
+                        body.appendChild(el);
+                        return el;
+                    });
+                    row.appendChild(body);
+                    buttons.forEach(function (b) { row.appendChild(b); });
+                    return { row: row, lines: nodes };
+                }
+
+                function render() {
+                    var list = $('lbList');
+                    list.innerHTML = '';
+                    $('lbEmpty').classList.toggle('hide', config.Stations.length > 0);
+                    config.Stations.forEach(function (s) {
+                        var title = label(s) + (s.Network ? '  -  ' + s.Network : '') + (airing[s.Id] ? '  -  ON NOW: ' + airing[s.Id] : '');
+                        var r = textRow([title, s.StreamUrl ? s.Url + '  (stream: ' + s.StreamUrl + ')' : s.Url, ''], [], !s.Enabled);
+                        var d = describeState(s);
+                        setLine(r.lines[2], d[0], d[1]);
+                        r.lines[2].setAttribute('aria-live', 'polite');
+                        r.row.appendChild(iconButton('network_check', 'Test now', function () { runTest(s, r.lines[2]); }));
+                        r.row.appendChild(iconButton(s.Enabled ? 'visibility' : 'visibility_off', s.Enabled ? 'Disable' : 'Enable', function () {
+                            s.Enabled = !s.Enabled;
+                            save();
+                        }));
+                        r.row.appendChild(iconButton('edit', 'Edit', function () { startEdit(s.Id); }));
+                        r.row.appendChild(iconButton('delete', 'Delete', function () { remove(s.Id); }));
+                        list.appendChild(r.row);
+                    });
+
+                    var teams = $('lbTeams');
+                    teams.innerHTML = '';
+                    (config.Teams || []).forEach(function (t, i) {
+                        var r = textRow([t.Name || t.Team, t.League.toUpperCase() + '  -  ESPN team ' + t.Team], [iconButton('delete', 'Remove team', function () {
+                            config.Teams.splice(i, 1);
+                            render();
+                        })]);
+                        teams.appendChild(r.row);
+                    });
+                }
+
+                function refreshStatus() {
+                    api('GET', 'Status').then(function (r) {
+                        status = {};
+                        if (r.reachable) {
+                            (r.stations || []).forEach(function (st) { status[st.id] = st; });
+                            var enabled = (r.stations || []).filter(function (st) { return st.enabled; });
+                            var ready = enabled.filter(function (st) { return st.state === 'ready'; }).length;
+                            setLine($('lbSidecarStatus'), 'Sidecar reachable. ' + ready + ' of ' + enabled.length + ' enabled stations have a stream ready.' + syncText(r.lastSync), true);
+                        } else {
+                            setLine($('lbSidecarStatus'), r.error + syncText(r.lastSync), false);
+                        }
+                        render();
+                    }, function () { setLine($('lbSidecarStatus'), 'Could not get the sidecar status.', false); });
+
+                    api('GET', 'Sports').then(function (r) {
+                        airing = {};
+                        if (r.error) { setLine($('lbGames'), r.error, false); render(); return; }
+                        if (!r.active) { setLine($('lbGames'), 'Local sports are off or no teams are set.', null); render(); return; }
+                        (r.onAir || []).forEach(function (g) { airing[g.station] = g.title; });
+                        var names = {};
+                        config.Stations.forEach(function (s) { names[s.Id] = label(s); });
+                        var fmt = function (g) { return new Date(g.start).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + '  ' + g.title + '  on ' + (names[g.station] || g.station); };
+                        var lines = [];
+                        if ((r.onAir || []).length) lines.push('On the air now:', r.onAir.map(fmt).join('\n'));
+                        var next = (r.upcoming || []).filter(function (g) { return !airing[g.station] || airing[g.station] !== g.title; }).slice(0, 8);
+                        lines.push(next.length ? 'Coming up on your stations (next 7 days):' : 'No local games on your stations in the next 7 days.');
+                        if (next.length) lines.push(next.map(fmt).join('\n'));
+                        setLine($('lbGames'), lines.join('\n'), null);
+                        render();
+                    }, function () { setLine($('lbGames'), 'Could not get the local games.', false); });
+                }
+
+                function syncText(s) {
+                    if (!s) return '';
+                    var parts = [];
+                    if (s.LiveTvError || s.liveTvError) parts.push('Live TV setup failed: ' + (s.LiveTvError || s.liveTvError));
+                    if (s.GuideRefreshQueued || s.guideRefreshQueued) parts.push('Guide refresh queued.');
+                    return parts.length ? ' ' + parts.join(' ') : '';
+                }
+
+                function load() {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(pluginId).then(function (c) {
+                        config = c;
+                        config.Stations = config.Stations || [];
+                        config.Teams = config.Teams || [];
+                        $('lbSidecarUrl').value = config.SidecarUrl || '';
+                        $('lbApiKey').value = config.ApiKey || '';
+                        $('lbManageLiveTv').checked = config.ManageLiveTv !== false;
+                        $('lbSportsEnabled').checked = config.SportsEnabled !== false;
+                        $('lbSportsChannel').value = config.SportsChannel || '1.1';
+                        render();
+                        Dashboard.hideLoadingMsg();
+                        refreshStatus();
+                        api('GET', 'Markets').then(function (markets) {
+                            var sel = $('lbMarket');
+                            sel.innerHTML = '';
+                            markets.forEach(function (m) {
+                                var o = document.createElement('option');
+                                o.value = m.Id || m.id;
+                                o.textContent = (m.Name || m.name) + ' (' + (m.Stations || m.stations) + ' stations, ' + (m.Teams || m.teams) + ' teams)';
+                                sel.appendChild(o);
+                            });
+                            sel.value = config.Market || 'denver';
+                        });
+                    });
+                }
+
+                // Resolves to whether the settings were saved.
+                function save() {
+                    Dashboard.showLoadingMsg();
+                    return ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                        render();
+                        // The server pushes the changes to the sidecar after saving.
+                        setTimeout(refreshStatus, 1500);
+                        return true;
+                    }, function () {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Saving the settings failed. Reload the page and try again.');
+                        return false;
+                    });
+                }
+
+                function runTest(s, line) {
+                    setLine(line, 'Testing: opening the station page in the sidecar (up to a minute)...', null);
+                    return api('POST', 'Test/' + encodeURIComponent(s.Id)).then(function (r) {
+                        if (r.ok) {
+                            setLine(line, 'Live stream found (' + r.type + ' via ' + r.via + ', ' + Math.round((r.tookMs || 0) / 1000) + ' s).', true);
+                        } else {
+                            var c = r.details && r.details.candidates ? r.details.candidates.length : 0;
+                            var e = r.details && r.details.embeds ? r.details.embeds.map(function (x) { return x.provider; }).join(', ') : '';
+                            setLine(line, r.error + (c ? ' (' + c + ' manifests checked, none live)' : '') + (e ? ' Embedded players: ' + e + '.' : ''), false);
+                        }
+                    }, function () { setLine(line, 'The test request failed.', false); });
+                }
+
+                function resetForm() {
+                    $('lbStationForm').reset();
+                    $('lbEditId').value = '';
+                    $('lbSubmit').querySelector('span').textContent = 'Add station';
+                    $('lbCancel').classList.add('hide');
+                }
+
+                function startEdit(id) {
+                    var s = config.Stations.find(function (x) { return x.Id === id; });
+                    if (!s) return;
+                    $('lbEditId').value = s.Id;
+                    $('lbCallSign').value = s.CallSign || '';
+                    $('lbName').value = s.Name || '';
+                    $('lbChannel').value = s.Channel || '';
+                    $('lbNetwork').value = s.Network || '';
+                    $('lbUrl').value = s.Url || '';
+                    $('lbStreamUrl').value = s.StreamUrl || '';
+                    $('lbAliases').value = s.SportsAliases || '';
+                    $('lbLogo').value = s.Logo || '';
+                    $('lbSubmit').querySelector('span').textContent = 'Save changes';
+                    $('lbCancel').classList.remove('hide');
+                    $('lbName').focus();
+                }
+
+                function remove(id) {
+                    var s = config.Stations.find(function (x) { return x.Id === id; });
+                    if (!s || !confirm('Delete "' + label(s) + '"?')) return;
+                    config.Stations = config.Stations.filter(function (x) { return x.Id !== id; });
+                    save();
+                }
+
+                page.addEventListener('pageshow', load);
+                $('lbCancel').addEventListener('click', resetForm);
+
+                $('lbSidecarForm').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    var sidecarUrl = $('lbSidecarUrl').value.trim().replace(/\/+$/, '');
+                    if (!isHttpUrl(sidecarUrl)) {
+                        Dashboard.alert('Enter the sidecar URL in full, like http://127.0.0.1:8899');
+                        return false;
+                    }
+                    config.SidecarUrl = sidecarUrl;
+                    config.ApiKey = $('lbApiKey').value.trim();
+                    config.ManageLiveTv = $('lbManageLiveTv').checked;
+                    save();
+                    return false;
+                });
+
+                $('lbSportsForm').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    config.SportsEnabled = $('lbSportsEnabled').checked;
+                    config.SportsChannel = $('lbSportsChannel').value.trim() || '1.1';
+                    save();
+                    return false;
+                });
+
+                $('lbAddTeam').addEventListener('click', function () {
+                    var team = $('lbTeamId').value.trim();
+                    if (!/^[A-Za-z0-9-]{1,32}$/.test(team)) {
+                        Dashboard.alert('Enter the ESPN team abbreviation or id, e.g. den or 38.');
+                        return;
+                    }
+                    config.Teams.push({ League: $('lbTeamLeague').value, Team: team, Name: $('lbTeamName').value.trim() || team });
+                    $('lbTeamId').value = '';
+                    $('lbTeamName').value = '';
+                    render();
+                });
+
+                $('lbSync').addEventListener('click', function () {
+                    setLine($('lbSidecarStatus'), 'Syncing...', null);
+                    api('POST', 'Sync').then(function (r) {
+                        var ok = (r.SidecarOk || r.sidecarOk) && (!config.ManageLiveTv || r.LiveTvOk || r.liveTvOk);
+                        setLine($('lbSidecarStatus'), ok ? 'Synced.' + syncText(r) : (r.SidecarError || r.sidecarError || '') + syncText(r), !!ok);
+                        setTimeout(refreshStatus, 1000);
+                    }, function () { setLine($('lbSidecarStatus'), 'Sync failed.', false); });
+                });
+
+                $('lbDefaults').addEventListener('click', function () {
+                    var id = $('lbMarket').value;
+                    if (!id || !confirm('Replace your stations and teams with the bundled defaults for this market?')) return;
+                    api('GET', 'Markets/' + encodeURIComponent(id)).then(function (m) {
+                        config.Market = id;
+                        config.Stations = m.Stations || m.stations || [];
+                        config.Teams = m.Teams || m.teams || [];
+                        config.SportsChannel = m.SportsChannel || m.sportsChannel || config.SportsChannel;
+                        $('lbSportsChannel').value = config.SportsChannel || '1.1';
+                        save();
+                    });
+                });
+
+                $('lbStationForm').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    var url = $('lbUrl').value.trim();
+                    var streamUrl = $('lbStreamUrl').value.trim();
+                    if (!isHttpUrl(url) || (streamUrl && !isHttpUrl(streamUrl))) {
+                        Dashboard.alert('Enter full URLs starting with http:// or https://');
+                        return false;
+                    }
+
+                    var editId = $('lbEditId').value;
+                    var callSign = $('lbCallSign').value.trim().toUpperCase();
+                    var name = $('lbName').value.trim();
+                    var id = editId || slug(callSign || name);
+                    if (!id || id === 'local-sports') {
+                        Dashboard.alert('Enter a call sign or name.');
+                        return false;
+                    }
+                    if (!editId && config.Stations.some(function (x) { return x.Id === id; })) {
+                        Dashboard.alert('A station with id "' + id + '" already exists.');
+                        return false;
+                    }
+
+                    var existing = config.Stations.find(function (x) { return x.Id === id; });
+                    var entry = {
+                        Id: id,
+                        CallSign: callSign,
+                        Name: name,
+                        Channel: $('lbChannel').value.trim(),
+                        Network: $('lbNetwork').value.trim(),
+                        Url: url,
+                        StreamUrl: streamUrl || null,
+                        SportsAliases: $('lbAliases').value.trim() || null,
+                        Logo: $('lbLogo').value.trim() || null,
+                        Note: existing ? existing.Note : null,
+                        // A pasted stream URL turns a station the market file disabled back on.
+                        Enabled: existing ? (existing.Enabled || (!!streamUrl && streamUrl !== existing.StreamUrl)) : true
+                    };
+                    var idx = config.Stations.findIndex(function (x) { return x.Id === id; });
+                    if (idx >= 0) config.Stations[idx] = entry; else config.Stations.push(entry);
+                    // Keep what was typed when saving fails, so it can be saved again.
+                    save().then(function (ok) { if (ok) resetForm(); });
+                    return false;
+                });
+            })();
+        </script>
+    </div>
+</body>
+</html>
