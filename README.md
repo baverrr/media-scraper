@@ -1,11 +1,12 @@
-# Media Scraper
+# Local Broadcast for Jellyfin
 
-Two things live here:
+**Local Broadcast is a Jellyfin plugin** that adds your local TV stations to Jellyfin's Live TV, using the free live streams on the stations' own websites. Its main feature is **local sports**: when one of your local teams plays on over-the-air TV, a *Local Sports* channel switches to the station airing the game, that station jumps to the top of the channel list, and the game shows in the guide and in Jellyfin's Sports row. See [Local sports first](#local-sports-first).
 
-- **[Local Broadcast for Jellyfin](#local-broadcast-for-jellyfin)**: your local TV stations' free web streams in Jellyfin's Live TV, with stations airing local sports first.
-- **[media-scraper.js](#media-scraperjs)**: the dependency-free browser script it's built on, which finds media players and streams on any web page and tells you which are live.
+It works with Jellyfin 12.2 and needs a small companion Docker container (the sidecar). See [Install](#install).
 
-## Local Broadcast for Jellyfin
+This repository also contains **[media-scraper.js](#media-scraperjs)**, the dependency-free browser script the plugin is built on. It finds media players and streams on any web page and tells you which are live, and works on its own.
+
+## How it works
 
 Many local TV stations stream live for free on their own websites, but those players need a real browser and their stream URLs carry tokens that expire within minutes or hours. Local Broadcast has two parts:
 
@@ -16,7 +17,7 @@ Many local TV stations stream live for free on their own websites, but those pla
 
 ### Local sports first
 
-Give the plugin your local teams (the Denver market comes with the Broncos, Nuggets, Avalanche, Rockies, Rapids, Denver Summit FC, CU, CSU and Air Force). The sidecar reads each team's schedule and TV listings from ESPN's public API and matches over-the-air broadcasts to your stations by network (a CBS game is on the CBS affiliate), call sign, name or the station's *sports aliases*. While a game is on (from 15 minutes before the start):
+This is the plugin's headline feature. Give the plugin your local teams (the Denver market comes with the Broncos, Nuggets, Avalanche, Rockies, Rapids, Denver Summit FC, CU, CSU and Air Force). The sidecar reads each team's schedule and TV listings from ESPN's public API and matches over-the-air broadcasts to your stations by network (a CBS game is on the CBS affiliate), call sign, name or the station's *sports aliases*. While a game is on (from 15 minutes before the start):
 
 - the **Local Sports** channel (number 1.1 by default) plays whichever station is airing the game;
 - that station moves to the top of the playlist and its stream resolves ahead of every other station, pre-fetched shortly before the start so tuning in is instant;
