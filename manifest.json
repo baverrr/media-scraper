@@ -1,0 +1,20 @@
+[
+  {
+    "versions": [
+      {
+        "version": "1.0.1.0",
+        "changelog": "Bug fixes: streams no longer stall at each refresh, a failed Test leaves a playing channel alone, sturdier settings page (clear errors for a wrong sidecar URL or API key), Local Sports guide starts with the pre-game, and better stream detection on station pages.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/baverrr/media-scraper/releases/download/v1.0.1/local-broadcast_1.0.1.0.zip",
+        "checksum": "c62a90f27d9145059c3b7f7bcf090f7e",
+        "timestamp": "2026-10-26T23:05:24Z"
+      }
+    ],
+    "guid": "d0766040-c26a-4cc7-9c0b-c7064aa77001",
+    "name": "Local Broadcast",
+    "overview": "Local TV stations' free web streams in Live TV, local sports first",
+    "description": "Adds your market's local TV stations to Live TV as an M3U tuner with a guide, using the free live streams on the stations' own websites (found by the local-broadcast sidecar, a small Docker container). Stations airing a local team's game come first, and a Local Sports channel always plays the station that has the game.",
+    "owner": "baverrr",
+    "category": "LiveTV"
+  }
+]
