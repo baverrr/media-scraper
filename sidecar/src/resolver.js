@@ -43,8 +43,11 @@ function cookieHeader(cookies, url) {
 }
 
 export class Resolver {
-  constructor({ scraperPath, ytDlp = 'yt-dlp', maxHeight = 1080, pageTimeoutMs = 45_000, waitMs = 20_000, channel = 'chrome', log = console } = {}) {
+  // timezoneId: the station's time zone for the browser (players check it against the market);
+  // unset uses the host's.
+  constructor({ scraperPath, ytDlp = 'yt-dlp', maxHeight = 1080, pageTimeoutMs = 45_000, waitMs = 20_000, channel = 'chrome', timezoneId, log = console } = {}) {
     this.scraperPath = scraperPath;
+    this.timezoneId = timezoneId;
     this.channel = channel;
     this.ytDlp = ytDlp;
     this.maxHeight = maxHeight;
@@ -96,7 +99,7 @@ export class Resolver {
     const context = await browser.newContext({
       userAgent: ua,
       locale: 'en-US',
-      timezoneId: 'America/Denver',
+      ...(this.timezoneId ? { timezoneId: this.timezoneId } : {}),
       viewport: { width: 1280, height: 720 },
     });
     const found = [];

@@ -5,6 +5,9 @@
 #   export LOCAL_BROADCAST_API_KEY=$(openssl rand -hex 24)
 #   docker compose -f sidecar/compose.yaml up -d
 #
+# Or put LOCAL_BROADCAST_API_KEY (and optionally MARKET, TZ) in sidecar/.env. MARKET is one of
+# the files in sidecar/markets/; TZ is the market's time zone (default: the market file's).
+#
 # Put the same key in the Jellyfin plugin's settings.
 services:
   local-broadcast:
@@ -21,8 +24,8 @@ services:
       - "127.0.0.1:8899:8899"
     environment:
       API_KEY: ${LOCAL_BROADCAST_API_KEY:?set LOCAL_BROADCAST_API_KEY}
-      MARKET: denver # default stations and teams until the plugin sends its own
-      TZ: America/Denver
+      MARKET: ${MARKET:-denver} # default stations and teams until the plugin sends its own
+      TZ: ${TZ:-}
       MAX_HEIGHT: "1080"
     volumes:
       - local-broadcast-data:/data
