@@ -1,0 +1,8 @@
+.scratch/
+node_modules/
+sidecar/data/
+sidecar/.env
+bin/
+obj/
+dist/
+release/

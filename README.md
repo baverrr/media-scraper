@@ -1,10 +1,112 @@
 # Media Scraper
 
+Two things live here:
+
+- **[Local Broadcast for Jellyfin](#local-broadcast-for-jellyfin)**: your local TV stations' free web streams in Jellyfin's Live TV, with stations airing local sports first.
+- **[media-scraper.js](#media-scraperjs)**: the dependency-free browser script it's built on, which finds media players and streams on any web page and tells you which are live.
+
+## Local Broadcast for Jellyfin
+
+Many local TV stations stream live for free on their own websites, but those players need a real browser and their stream URLs carry tokens that expire within minutes or hours. Local Broadcast has two parts:
+
+| Part | What it does |
+| --- | --- |
+| **Sidecar** (`sidecar/`, Docker image) | Opens each station's live page in headless Chrome with `media-scraper.js` loaded first, finds the live HLS stream, and serves it to Jellyfin through a small proxy that re-resolves expired tokens behind stable URLs. Also serves an M3U playlist and an XMLTV guide. |
+| **Jellyfin plugin** (`Jellyfin.Plugin.LocalBroadcast/`) | Settings page for stations and local teams, pushes them to the sidecar, and adds the sidecar to Live TV as an M3U tuner with an XMLTV guide, so there's nothing to configure under Live TV yourself. |
+
+### Local sports first
+
+Give the plugin your local teams (the Denver market comes with the Broncos, Nuggets, Avalanche, Rockies, Rapids, Denver Summit FC, CU, CSU and Air Force). The sidecar reads each team's schedule and TV listings from ESPN's public API and matches over-the-air broadcasts to your stations by network (a CBS game is on the CBS affiliate), call sign, name or the station's *sports aliases*. While a game is on (from 15 minutes before the start):
+
+- the **Local Sports** channel (number 1.1 by default) plays whichever station is airing the game;
+- that station moves to the top of the playlist and its stream resolves ahead of every other station, pre-fetched shortly before the start so tuning in is instant;
+- the guide shows the game (category *Sports*, so it appears in Jellyfin's Sports row) on that station and on Local Sports, refreshed whenever the schedule changes.
+
+Honest caveat: stations' web streams often show their own news programming instead of network games, because networks and leagues rarely allow games on station websites. The guide description says so.
+
+### What works (Denver market)
+
+The Denver market file lists 19 stations. These 6 play in Jellyfin (tested with Jellyfin 12.2's ffmpeg):
+
+| Station | Channel | Network |
+| --- | --- | --- |
+| KCNC CBS Colorado | 4.1 | CBS |
+| KOAA News5 (Colorado Springs / Pueblo) | 5.1 | NBC |
+| KMGH Denver7 | 7.1 | ABC |
+| KUSA 9NEWS | 9.1 | NBC |
+| KDEN Telemundo Denver | 25.1 | Telemundo |
+| KRMT Daystar | 41.1 | Daystar |
+
+The other 13 are listed but disabled, each with a note in the settings page:
+
+| Why | Stations |
+| --- | --- |
+| Site shows a bot check (Nexstar) | KWGN CW2, KDVR FOX31 |
+| Web stream is DRM-protected | KRMA Rocky Mountain PBS, KBDI PBS12 |
+| Streams only in the network's app | KCEC Univision, KTFD UniMas, KPXC ION |
+| No live stream on the website | KCDO The Spot, KTVD My20, KRDO 13, KPJR TBN, KETD Estrella TV |
+| Station player fails in headless browsers | KKTV 11 |
+
+The sidecar does not get around bot checks, DRM or sign-ins. A disabled station can be turned on by pasting a **stream URL** you're allowed to use (a non-expiring `.m3u8`, or a page yt-dlp supports, such as the station's YouTube live) into its settings.
+
+### Install
+
+1. **Run the sidecar** next to Jellyfin:
+
+   ```bash
+   export LOCAL_BROADCAST_API_KEY=$(openssl rand -hex 24)
+   docker compose -f sidecar/compose.yaml up -d
+   ```
+
+   It listens on `127.0.0.1:8899` (Jellyfin re-serves the streams to your clients, so it needn't be reachable from elsewhere). With Jellyfin in a bridge-network container instead of host networking, put both on one Docker network and use `http://local-broadcast:8899`.
+
+2. **Install the plugin**: in Jellyfin, Dashboard > Plugins > Repositories, add
+
+   ```
+   https://baverrr.github.io/media-scraper/manifest.json
+   ```
+
+   then install **Local Broadcast** from the catalog and restart Jellyfin. (Needs Jellyfin 12.2.)
+
+3. **Configure**: Dashboard > Plugins > Local Broadcast: set the sidecar URL and the API key, pick your market, and save. The plugin adds the *Local Broadcast* tuner and guide; channels appear in Live TV after the guide refresh it queues.
+
+Use **Test now** on a station to see exactly what the sidecar finds (or why not): offline, DRM, bot check, no live manifest, embedded YouTube player, and so on.
+
+### Other markets
+
+Markets are JSON files in [`sidecar/markets/`](sidecar/markets/): stations (id, call sign, name, channel, network, live page URL, optional `streamUrl`, `sportsAliases`, `note`, `enabled`) and local teams (`league` plus ESPN's team abbreviation or id, from the team's ESPN page URL). Add a file for your area, run the station tests from the settings page, and send a pull request. The plugin bundles every market file at build time.
+
+### Sidecar configuration
+
+| Variable | Default | |
+| --- | --- | --- |
+| `API_KEY` | none | Required for changes from the plugin (`X-Api-Key`). |
+| `MARKET` | `denver` | Defaults until the plugin sends its own stations and teams. |
+| `MAX_HEIGHT` | `1080` | Highest quality picked from a station's variants. |
+| `RESOLVE_TTL_MINUTES` | `30` | How long a found stream is reused (shorter when its token expires sooner). |
+| `MAX_CONCURRENT_RESOLVES` | `2` | Browser pages at once; local-sports stations jump the queue. |
+| `BROWSER_CHANNEL` | `chrome` | `chrome` has H.264/AAC (many players need them); empty uses bundled Chromium. |
+| `PUBLIC_URL` | from the request | Base URL written into the M3U. |
+
+HTTP API: `GET /playlist.m3u`, `GET /guide.xml`, `GET /stream/<id>.m3u8` (`local-sports` included), `GET /api/status`, `GET /api/sports`, `GET /api/stations`; with the API key: `PUT /api/stations`, `PUT /api/sports`, `POST /api/stations/<id>/test`. Proxied segment URLs are HMAC-signed, so the proxy can't be used to fetch arbitrary URLs.
+
+### Development
+
+```bash
+(cd sidecar && npm ci && npm test)
+docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet test Jellyfin.Plugin.LocalBroadcast.Tests
+docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
+```
+
+CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main), and on a `vX.Y.Z` tag matching `version` in `build.yaml` publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin repository manifest on GitHub Pages. Installing from GitHub needs the repository, its Pages site and the container package to be public. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
+
+## media-scraper.js
+
 A single, dependency-free browser script that finds media players and streams on any web page and tells you which ones are live.
 
-## Usage
+### Usage
 
-### DevTools console / bookmarklet / userscript
+#### DevTools console / bookmarklet / userscript
 
 Paste `media-scraper.js` into the console (or load it as a bookmarklet or userscript), then:
 
@@ -18,7 +120,7 @@ MediaScraper.copy()                           // copy last results as JSON
 MediaScraper.results                          // last results
 ```
 
-### Puppeteer / Playwright
+#### Puppeteer / Playwright
 
 ```js
 await page.addScriptTag({ path: 'media-scraper.js' });
@@ -27,7 +129,7 @@ const results = await page.evaluate(() => MediaScraper.scan().then(MediaScraper.
 
 `toJSON` strips the DOM node references so the results serialize cleanly.
 
-### Loading early (recommended for MSE players)
+#### Loading early (recommended for MSE players)
 
 To pair hls.js, dash.js and Shaka players with their manifests, the script has to run before the page creates them. Load it before the page's own scripts:
 
@@ -37,7 +139,7 @@ To pair hls.js, dash.js and Shaka players with their manifests, the script has t
 
 Loaded this way, it hooks each library the moment the library assigns itself to `window`.
 
-## What it detects
+### What it detects
 
 | Source | Details |
 | --- | --- |
@@ -50,17 +152,17 @@ Results are deduplicated by URL; each item lists every method that found it in `
 
 Before comparing URLs, parameters that change on every request are dropped: low-latency HLS directives (`_HLS_msn`, `_HLS_part`, …) and cache-busters (`_`, `t`, `ts`, `cb`, `rnd`, …) when their value is a timestamp or random number. A playlist polled once a second is one result, not hundreds. Other parameters, such as signed tokens, are kept exactly as they were.
 
-### Network capture
+#### Network capture
 
 As soon as the script loads, it starts a `PerformanceObserver` that records stream requests. Browsers keep only 250 entries in the resource timing buffer, and a live page re-fetches its playlist every few seconds, so `performance.getEntries()` alone stops showing new manifests quickly; the observer keeps receiving them. It keeps the 500 most recently active streams. Same-origin iframes are observed from the first scan that finds them.
 
-### Pairing players with manifests
+#### Pairing players with manifests
 
 MSE players (hls.js, dash.js, Shaka) play a `blob:` URL, so the `<video>` itself doesn't say what it's playing. The script hooks `Hls.prototype`, `shaka.Player.prototype` and the `dashjs.MediaPlayer` factory to capture instances created or loaded from then on. If the libraries don't exist yet because the script was [loaded early](#loading-early-recommended-for-mse-players), it hooks each one as soon as it's assigned to `window`. Each MSE element is then linked to its own instance's manifest (`manifest`, `library`) and inherits its live status.
 
 Without a captured instance, the script only guesses when it's unambiguous — one unpaired MSE element and one live manifest — and marks the guess with `manifestGuessed: true`.
 
-### Live probing
+#### Live probing
 
 With `probe` on (the default), HLS and DASH manifests whose status is unknown are fetched:
 
@@ -69,7 +171,7 @@ With `probe` on (the default), HLS and DASH manifests whose status is unknown ar
 
 Requests go out with cookies first (for token-gated streams), then without (for CDNs that send `Access-Control-Allow-Origin: *`).
 
-## Result fields
+### Result fields
 
 | Field | Meaning |
 | --- | --- |
@@ -86,7 +188,7 @@ Requests go out with cookies first (for token-gated streams), then without (for 
 | `variants` | HLS variant streams (after probing) |
 | `probeError` | Why probing failed (`HTTP 403`, `not a manifest`, `timeout`, `blocked (CORS?)`) |
 
-## Watch mode
+### Watch mode
 
 `watch()` hooks `fetch`, `XMLHttpRequest`, `WebSocket` and resource timing in the page and in every same-origin iframe, including iframes added or reloaded later. It also observes DOM changes in open shadow roots and iframe documents.
 
@@ -96,7 +198,7 @@ Requests go out with cookies first (for token-gated streams), then without (for 
 
 `unwatch()` restores everything it replaced.
 
-## Limitations
+### Limitations
 
 - Cross-origin iframes can't be inspected; only their `src` is reported.
 - Closed shadow roots are invisible.
