@@ -32,6 +32,12 @@ const routes = {
   '/frame-a': ['text/html', html('<script>fetch("/a.m3u8")</script>')],
   '/frame-b': ['text/html', html('<script>fetch("/b.m3u8")</script>')],
   '/a.m3u8': ['application/vnd.apple.mpegurl', live],
+  // First variant gone: the master's probe can't tell, its live variant can.
+  '/fold/master.m3u8': ['application/vnd.apple.mpegurl', '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\ngone.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhigh.m3u8\n'],
+  '/fold/high.m3u8': ['application/vnd.apple.mpegurl', live],
+  '/w/master.m3u8': ['application/vnd.apple.mpegurl', '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nlow.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhigh.m3u8\n'],
+  '/w/low.m3u8': ['application/vnd.apple.mpegurl', live],
+  '/w/high.m3u8': ['application/vnd.apple.mpegurl', live],
   '/b.m3u8': ['application/vnd.apple.mpegurl', live],
 };
 
@@ -210,4 +216,92 @@ test('markup: streams passed to a player page are unwrapped; lookalike extension
   assert.ok(urls.includes('https://cdn.example/live/b.m3u8?token=x'), JSON.stringify(urls));
   assert.ok(!urls.some(u => u.startsWith('https://player.example/')), JSON.stringify(urls));
   assert.ok(!urls.some(u => u.includes('thumb')), JSON.stringify(urls));
+});
+
+test('markup: a manifest whose query carries a URL is kept; code fragments are not manifests', async t => {
+  const page = await open(t, `<script>var c = {
+    ssai: "https://cdn.example/live/master.m3u8?token=abc&ref=https%3A%2F%2Fstation.example%2Fwatch-live",
+  };
+  function isHls(u) { return u.indexOf(".m3u8") > 0; }
+  function src(id) { return "https://cdn.example/live/" + id + ".m3u8"; }
+  var split = '/l' + 'ive.mpd';
+  </script>`);
+  if (!page) return;
+  const urls = (await scan(page, { probe: false })).map(i => i.url);
+  assert.ok(urls.includes('https://cdn.example/live/master.m3u8?token=abc&ref=https%3A%2F%2Fstation.example%2Fwatch-live'), JSON.stringify(urls));
+  assert.ok(!urls.some(u => u.includes('station.example/watch-live') && !u.includes('.m3u8')), JSON.stringify(urls));
+  assert.ok(!urls.some(u => /\/\.m3u8$|\/ive\.mpd$/.test(u)), JSON.stringify(urls));
+});
+
+test('embeds: live only from the path or a channel player, not from a query value', async t => {
+  const page = await open(t, `
+    <iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?origin=https://livestream.station.example"></iframe>
+    <iframe src="https://player.twitch.tv/?channel=station&parent=x"></iframe>
+    <iframe src="https://livestream.com/accounts/1/events/2/player"></iframe>`);
+  if (!page) return;
+  const embeds = (await scan(page, { probe: false })).filter(i => i.kind === 'embed');
+  assert.equal(embeds.find(e => e.provider === 'YouTube').live, null);
+  assert.equal(embeds.find(e => e.provider === 'Twitch').live, true);
+  assert.equal(embeds.find(e => e.provider === 'Livestream').live, true);
+});
+
+test('fold: a live variant makes its master live when the first variant is gone', async t => {
+  const page = await open(t, `<script>fetch('/fold/master.m3u8'); fetch('/fold/high.m3u8')</script>`);
+  if (!page) return;
+  await page.waitForTimeout(300);
+  const items = (await scan(page)).filter(i => i.url.includes('/fold/'));
+  assert.equal(items.length, 1, JSON.stringify(items));
+  assert.equal(items[0].live, true);
+});
+
+test('watch(): a master and the variant the player loads are one report', async t => {
+  const page = await open(t, '');
+  if (!page) return;
+  const reported = await page.evaluate(() => new Promise(resolve => {
+    const got = [];
+    MediaScraper.watch(i => got.push(i.url.replace(location.origin, '')));
+    fetch('/w/master.m3u8').then(() => fetch('/w/high.m3u8'));
+    setTimeout(() => { MediaScraper.unwatch(); resolve(got); }, 1500);
+  }));
+  assert.deepEqual(reported, ['/w/master.m3u8']);
+});
+
+test('unwatch(): saved references stop reporting, and page wrappers added later stay', async t => {
+  const page = await open(t, '');
+  if (!page) return;
+  const r = await page.evaluate(async () => {
+    const got = [];
+    MediaScraper.watch(i => got.push(i.url));
+    const saved = window.fetch;
+    const pageWrapper = function (...a) { return saved.apply(this, a); };
+    window.fetch = pageWrapper; // e.g. an error-reporting library, installed after watch()
+    MediaScraper.unwatch();
+    await saved('/a.m3u8');
+    await new Promise(res => setTimeout(res, 800));
+    return { got, kept: window.fetch === pageWrapper };
+  });
+  assert.deepEqual(r.got, []);
+  assert.equal(r.kept, true);
+});
+
+test('dash.js used in the same script that defines it is still captured', async t => {
+  // Mimics dash.js: assign an empty namespace, fill in the factory, then app code uses it.
+  const page = await open(t, `<video id=v></video><script>
+    window.dashjs = {};
+    dashjs.MediaPlayer = function () {
+      return { create() {
+        let src = null, el = null;
+        return {
+          initialize(e, s) { el = e; src = s; e.src = URL.createObjectURL(new MediaSource()); },
+          getSource() { return src; }, isDynamic() { return true; }, getVideoElement() { return el; },
+        };
+      } };
+    };
+    dashjs.MediaPlayer().create().initialize(v, location.origin + '/live.mpd');
+  </script>`);
+  if (!page) return;
+  const v = (await scan(page, { probe: false })).find(i => i.kind === 'video');
+  assert.equal(v.library, 'dash.js');
+  assert.equal(v.manifest, `${origin}/live.mpd`);
+  assert.ok(!v.manifestGuessed);
 });

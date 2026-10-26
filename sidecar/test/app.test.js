@@ -269,3 +269,33 @@ test('cache: a failed background refresh keeps the playable stream, a forced one
   t = 10 * 60_000; // the token expired: nothing playable is left
   assert.equal(cache.peek('a'), null);
 });
+
+test('cache: an expiry already past when resolved is ignored (the URL just worked)', async () => {
+  let t = Date.UTC(2026, 9, 26);
+  let n = 0;
+  const cache = new ResolutionCache({ ttlMs: 30 * 60_000, now: () => t, resolve: async () => { n++; return { url: 'https://cdn/x.m3u8?e=1700000000', type: 'hls', expiresAt: 1_700_000_000_000 }; } });
+  await cache.get({ id: 'a' });
+  t += 5 * 60_000;
+  await cache.get({ id: 'a' });
+  assert.equal(n, 1); // not re-resolved every 30 s
+  assert.equal(cache.peek('a')?.url, 'https://cdn/x.m3u8?e=1700000000');
+});
+
+test('cache: after a failed forced re-resolve, the rejected stream is not served again', async () => {
+  let t = 0;
+  let fail = false;
+  let n = 0;
+  const cache = new ResolutionCache({ ttlMs: 60_000, failureMs: 60_000, now: () => t, resolve: async () => {
+    n++;
+    if (fail) throw new Error('page changed');
+    return { url: 'https://cdn.example/1.m3u8', type: 'hls' };
+  } });
+  await cache.get({ id: 'a' });
+  fail = true; // upstream now answers 403, and the page no longer resolves
+  await assert.rejects(cache.get({ id: 'a' }, { force: true }), /page changed/);
+  // The player's next polls get the remembered failure, without a new resolve each time.
+  for (let i = 0; i < 3; i++) await assert.rejects(cache.get({ id: 'a' }), /page changed/);
+  assert.equal(n, 2);
+  assert.equal(cache.peek('a'), null);
+  assert.equal(cache.status('a').state, 'failed');
+});

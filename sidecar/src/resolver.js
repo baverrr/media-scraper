@@ -151,13 +151,19 @@ export class Resolver {
 
       const cookies = await context.cookies();
       const candidates = mergeCandidates(found.filter(c => !AD_RE.test(c.url))).slice(0, 30);
-      for (const c of candidates) {
-        const headers = { 'user-agent': ua, referer: station.url, ...(c.headers || {}) };
-        const cookie = cookieHeader(cookies, c.url);
-        if (cookie && !headers.cookie) headers.cookie = cookie;
-        c.headers = headers;
-        c.probe = await probeManifest(c.url, headers, { maxHeight: this.maxHeight });
-      }
+      // A few at a time: one by one, unreachable candidates (10 s timeout each) add up to minutes.
+      let next = 0;
+      const probeNext = async () => {
+        while (next < candidates.length) {
+          const c = candidates[next++];
+          const headers = { 'user-agent': ua, referer: station.url, ...(c.headers || {}) };
+          const cookie = cookieHeader(cookies, c.url);
+          if (cookie && !headers.cookie) headers.cookie = cookie;
+          c.headers = headers;
+          c.probe = await probeManifest(c.url, headers, { maxHeight: this.maxHeight });
+        }
+      };
+      await Promise.all(Array.from({ length: 4 }, probeNext));
 
       const best = pickBest(candidates);
       if (best) {
