@@ -56,6 +56,21 @@ public class Station
     public string? Logo { get; set; }
 
     /// <summary>
+    /// Gets or sets the station's city, e.g. Pueblo, CO.
+    /// </summary>
+    public string? City { get; set; }
+
+    /// <summary>
+    /// Gets or sets the latitude of the station's city, for the coverage radius.
+    /// </summary>
+    public double? Latitude { get; set; }
+
+    /// <summary>
+    /// Gets or sets the longitude of the station's city, for the coverage radius.
+    /// </summary>
+    public double? Longitude { get; set; }
+
+    /// <summary>
     /// Gets or sets extra broadcaster names, comma separated, that mean a game airs on this
     /// station (e.g. "Altitude Sports" for a station simulcasting Altitude games).
     /// </summary>
@@ -145,6 +160,43 @@ public class PluginConfiguration : BasePluginConfiguration
     /// guide entries itself.
     /// </summary>
     public bool ManageLiveTv { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the latitude coverage distances are measured from. Unset uses the market's center.
+    /// </summary>
+    public double? HomeLatitude { get; set; }
+
+    /// <summary>
+    /// Gets or sets the longitude coverage distances are measured from. Unset uses the market's center.
+    /// </summary>
+    public double? HomeLongitude { get; set; }
+
+    /// <summary>
+    /// Gets or sets the coverage radius in miles: enabled stations farther away stay out of Live TV.
+    /// 0 means no limit. Stations without a location are always included.
+    /// </summary>
+    public int MaxDistanceMiles { get; set; }
+}
+
+/// <summary>
+/// A place: a market's center.
+/// </summary>
+public class GeoPoint
+{
+    /// <summary>
+    /// Gets or sets the city, e.g. Denver, CO.
+    /// </summary>
+    public string? City { get; set; }
+
+    /// <summary>
+    /// Gets or sets the latitude.
+    /// </summary>
+    public double Latitude { get; set; }
+
+    /// <summary>
+    /// Gets or sets the longitude.
+    /// </summary>
+    public double Longitude { get; set; }
 }
 
 /// <summary>
@@ -170,6 +222,11 @@ public class Market
     /// Gets or sets the Local Sports channel number.
     /// </summary>
     public string? SportsChannel { get; set; }
+
+    /// <summary>
+    /// Gets or sets the market's center, where coverage distances are measured from by default.
+    /// </summary>
+    public GeoPoint? Center { get; set; }
 
     /// <summary>
     /// Gets or sets the stations.
@@ -223,6 +280,7 @@ public class Market
         {
             Name = raw.Name ?? string.Empty,
             SportsChannel = raw.SportsChannel,
+            Center = raw.Center,
             Stations = (raw.Stations ?? []).Where(s => !string.IsNullOrWhiteSpace(s.Id)).Select(s => s.ToStation()).ToList(),
             Teams = (raw.Teams ?? []).Where(t => !string.IsNullOrWhiteSpace(t.League) && !string.IsNullOrWhiteSpace(t.Team)).ToList(),
         };
@@ -233,6 +291,8 @@ public class Market
         public string? Name { get; set; }
 
         public string? SportsChannel { get; set; }
+
+        public GeoPoint? Center { get; set; }
 
         public List<RawStation>? Stations { get; set; }
 
@@ -258,6 +318,12 @@ public class Market
 
         public string? Logo { get; set; }
 
+        public string? City { get; set; }
+
+        public double? Latitude { get; set; }
+
+        public double? Longitude { get; set; }
+
         [JsonPropertyName("sportsAliases")]
         public List<string>? SportsAliases { get; set; }
 
@@ -275,6 +341,9 @@ public class Market
             Url = Url,
             StreamUrl = StreamUrl,
             Logo = Logo,
+            City = City,
+            Latitude = Latitude,
+            Longitude = Longitude,
             SportsAliases = SportsAliases is { Count: > 0 } ? string.Join(", ", SportsAliases) : null,
             Note = Note,
             Enabled = Enabled,
