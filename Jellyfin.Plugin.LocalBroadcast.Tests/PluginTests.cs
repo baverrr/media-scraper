@@ -86,6 +86,37 @@ public class SidecarClientTests
         Assert.NotEqual(a, SyncService.GameSignature(Parse("""{"upcoming":[{"title":"A","start":"1","station":"kdvr"}]}""")));
         Assert.Equal(string.Empty, SyncService.GameSignature(Parse("""{"error":"x"}""")));
     }
+
+    [Fact]
+    public void PushedStationsRecordSurvivesRestarts()
+    {
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "lb-test-" + Guid.NewGuid().ToString("N"));
+        var path = System.IO.Path.Combine(dir, "last-pushed-stations.txt");
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        try
+        {
+            var run1 = new PushedStationsRecord(() => path, logger);
+            Assert.True(run1.Update("a"));  // nothing recorded yet
+            Assert.False(run1.Update("a"));
+            Assert.True(run1.Update("b"));
+
+            // After a restart: unchanged stations aren't a change, stations changed while down are.
+            Assert.False(new PushedStationsRecord(() => path, logger).Update("b"));
+            Assert.True(new PushedStationsRecord(() => path, logger).Update("c"));
+
+            // No data folder: still tracks changes within the run.
+            var noFile = new PushedStationsRecord(() => null, logger);
+            Assert.True(noFile.Update("a"));
+            Assert.False(noFile.Update("a"));
+        }
+        finally
+        {
+            if (System.IO.Directory.Exists(dir))
+            {
+                System.IO.Directory.Delete(dir, true);
+            }
+        }
+    }
 }
 
 public class LiveTvRegistrarTests
