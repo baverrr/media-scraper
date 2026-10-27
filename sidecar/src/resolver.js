@@ -67,12 +67,49 @@ export async function signInForm(page) {
   return { user: null, password: null };
 }
 
-// After the password: a field for a code the site sent (emailed code, text message, authenticator).
+// After the password: a field for a code the site sent (emailed code, text message, authenticator),
+// or a row of one-character boxes for one. ZIP, promo and similar "code" fields don't count.
 async function asksForCode(page) {
   for (const frame of page.frames()) {
-    if (await visible(frame, 'input[autocomplete="one-time-code"], input[name*="code" i], input[id*="code" i], input[name*="otp" i], input[name*="token" i]')) return true;
+    const found = await frame.evaluate(() => {
+      const inputs = [...document.querySelectorAll('input')].filter(el => el.offsetParent && !['hidden', 'checkbox', 'radio', 'submit', 'button'].includes(el.type));
+      const named = el => `${el.name} ${el.id} ${el.autocomplete} ${el.placeholder} ${el.getAttribute('aria-label') || ''}`;
+      const code = inputs.some(el => el.autocomplete === 'one-time-code'
+        || (/code|otp|mfa|2fa|two.?factor|verif|passcode/i.test(named(el)) && !/zip|post|promo|coupon|discount|gift|qr|bar|country|area|referr/i.test(named(el))));
+      return code || inputs.filter(el => el.maxLength === 1).length >= 4;
+    }).catch(() => false);
+    if (found) return true;
   }
   return false;
+}
+
+// Types a value into a field. Playwright's errors repeat the typed text, so a failure is only
+// reported as false, never with its message.
+async function typeInto(field, value) {
+  try {
+    await field.fill(value, { timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// An unexpected error from signing in or up, as a ResolveError whose message can't contain the
+// email or password (Playwright repeats what it was asked to type).
+function scrubbed(e, what, details, { username, password }) {
+  if (e instanceof ResolveError) return e;
+  let message = String(e?.message || e).split('\n')[0];
+  for (const secret of [password, username, JSON.stringify(password ?? '').slice(1, -1), encodeURIComponent(password ?? '')]) {
+    if (secret) message = message.split(secret).join('***');
+  }
+  return new ResolveError(`${what}: ${message}`, details);
+}
+
+// A page whose form submits with "Log in" / "Sign in": a sign-in form, not a sign-up one.
+async function looksLikeSignIn(frame) {
+  const names = await frame.locator('button[type="submit"], input[type="submit"], form button').filter({ visible: true })
+    .evaluateAll(els => els.map(el => (el.innerText || el.value || '').trim())).catch(() => []);
+  return names.length > 0 && names.every(n => /^(log ?in|sign ?in|continue|next|send login code)$/i.test(n)) && names.some(n => /log ?in|sign ?in|login code/i.test(n));
 }
 
 const SIGN_IN_NAMES = /^\s*(log ?in|sign ?in)\s*$/i;
@@ -80,7 +117,7 @@ const SIGN_UP_NAMES = /^\s*(sign ?up|register|join( now| free| for free)?|create
 // A box accepting the site's terms (or privacy policy), which the person accepted in the settings;
 // boxes agreeing to anything else (offers, partners, an age) are left to the person.
 const TERMS_LABEL = /\bterms\b|conditions|privacy policy|terms of (use|service)/i;
-const NOT_TERMS_LABEL = /offer|partner|marketing|newsletter|promot|updates|news\b|\b1[38]\b|years? old|age\b/i;
+const NOT_TERMS_LABEL = /offer|partner|marketing|newsletter|promot|updates|news\b|\b1[38]\b|years? old|\bage\b/i;
 const CONFIRM_EMAIL = /(verify|confirm|activate)\b[^.]{0,60}\b(e-?mail|account|address)|check your (e-?mail|inbox)/i;
 
 async function clickSignInLink(page) {
@@ -123,7 +160,7 @@ async function clickControl(page, names) {
 // A CAPTCHA the person would have to solve: a visible reCAPTCHA checkbox or challenge, hCaptcha
 // or Cloudflare Turnstile. Invisible reCAPTCHA that never challenges is fine.
 async function showsCaptcha(page) {
-  const sel = 'iframe[src*="recaptcha"][src*="bframe"], iframe[src*="recaptcha"][src*="anchor"]:not([src*="size=invisible"]), iframe[src*="hcaptcha.com"], iframe[src*="challenges.cloudflare.com"], iframe[src*="arkoselabs"], iframe[src*="funcaptcha"], iframe[title*="captcha" i], .g-recaptcha, .h-captcha, .cf-turnstile';
+  const sel = 'iframe[src*="recaptcha"][src*="bframe"], iframe[src*="recaptcha"][src*="anchor"]:not([src*="size=invisible"]), iframe[src*="hcaptcha.com"], iframe[src*="challenges.cloudflare.com"], iframe[src*="arkoselabs"], iframe[src*="funcaptcha"], iframe[title*="captcha" i]';
   for (const frame of page.frames()) {
     if ((await frame.locator(sel).filter({ visible: true }).count().catch(() => 0)) > 0) return true;
   }
@@ -207,9 +244,14 @@ export class Resolver {
       // Only a page with no stream at all suggests the session expired; a bot check, DRM or a
       // failed sign-in wouldn't get better by signing in again.
       if (!login?.session || !(e instanceof ResolveError) || e.details?.reason !== 'no-stream') throw e;
+      // Too soon to sign in again (or a failed sign-in waiting): keep the session, and report the
+      // page as it was, so a station that is just off the air still plays its slate.
+      // A session signed in recently is probably fine and the station just off the air.
+      // Test now (retrying) asks for a fresh sign-in whatever the session's age.
+      if ((login.sessionFresh?.() && !login.retrying?.()) || login.mayAttempt?.()) throw e;
       this.log.info?.(`[${station.id}] no stream with the saved session; signing in again`);
       await login.forgetSession();
-      return this.resolvePage(station, { ...login, session: null });
+      return this.resolvePage(station, { ...login, session: null, mayAttempt: () => null });
     }
   }
 
@@ -361,6 +403,14 @@ export class Resolver {
   // in" / "Sign in" link when it isn't showing, email (then "next" on two-step forms), password,
   // Enter. A CAPTCHA ends it: the sidecar doesn't solve them.
   async signIn(context, station, login) {
+    try {
+      return await this.signInSteps(context, station, login);
+    } catch (e) {
+      throw scrubbed(e, 'Sign-in', { signIn: true }, login);
+    }
+  }
+
+  async signInSteps(context, station, login) {
     const url = station.signInUrl || station.url;
     const waiting = login.mayAttempt?.();
     if (waiting) throw new ResolveError(`Sign-in: ${waiting}`, { signIn: true, url });
@@ -379,15 +429,15 @@ export class Resolver {
       }
       if (await showsCaptcha(page)) return await fail('the site asks for a CAPTCHA, which the sidecar doesn\'t solve');
       if (!form.user && !form.password) return await fail(`no sign-in form found at ${url}`);
-      if (form.user) await form.user.fill(login.username);
+      if (form.user && !(await typeInto(form.user, login.username))) return await fail('couldn\'t type into the site\'s email field');
       if (!form.password) {
-        await form.user.press('Enter');
+        await form.user.press('Enter', { timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(3000);
         form = await signInForm(page);
         if (!form.password) return await fail(await showsCaptcha(page) ? 'the site asks for a CAPTCHA, which the sidecar doesn\'t solve' : 'the sign-in form has no password field after the email');
       }
-      await form.password.fill(login.password);
-      await form.password.press('Enter');
+      if (!(await typeInto(form.password, login.password))) return await fail('couldn\'t type into the site\'s password field');
+      await form.password.press('Enter', { timeout: 5000 }).catch(() => {});
       for (let waited = 0; waited < 20_000; waited += 1000) {
         await page.waitForTimeout(1000);
         if (await showsCaptcha(page)) return await fail('the site asks for a CAPTCHA, which the sidecar doesn\'t solve');
@@ -409,7 +459,15 @@ export class Resolver {
   // the site's own sign-up form, when it asks for nothing else: email, password (and a repeat of
   // it) and, if acceptTerms, its terms box. It stops at a CAPTCHA or any other required field; an
   // email to confirm is left to the person. Returns { confirmEmail, session }.
-  async signUp(station, { username, password, acceptTerms = false }) {
+  async signUp(station, account) {
+    try {
+      return await this.signUpSteps(station, account);
+    } catch (e) {
+      throw scrubbed(e, 'Sign-up', { signUp: true }, account);
+    }
+  }
+
+  async signUpSteps(station, { username, password, acceptTerms = false }) {
     const url = station.signUpUrl;
     const fail = message => { throw new ResolveError(`Sign-up: ${message}`, { signUp: true, url }); };
     if (!url) fail('the station has no sign-up page URL');
@@ -424,6 +482,7 @@ export class Resolver {
       const form = await signInForm(page);
       if (!form.password || !form.user) fail(`no sign-up form with an email and password at ${url}`);
       const frame = form.frame;
+      if (await looksLikeSignIn(frame)) fail(`${url} shows a sign-in form, not a sign-up form`);
 
       const extra = await otherRequiredFields(frame);
       if (extra.length) fail(`the form asks for more than an email and password (${extra.join(', ')}); create the account on the site yourself`);
@@ -440,10 +499,10 @@ export class Resolver {
         } // optional boxes (newsletters) stay unticked
       }
 
-      await form.user.fill(username);
+      if (!(await typeInto(form.user, username))) fail('couldn\'t type into the site\'s email field');
       const passwords = await frame.locator('input[type="password"]').filter({ visible: true }).all();
-      for (const p of passwords) await p.fill(password);
-      await passwords[passwords.length - 1].press('Enter');
+      for (const p of passwords) if (!(await typeInto(p, password))) fail('couldn\'t type into the site\'s password field');
+      await passwords[passwords.length - 1].press('Enter', { timeout: 5000 }).catch(() => {});
 
       for (let waited = 0; waited < 20_000; waited += 1000) {
         await page.waitForTimeout(1000);

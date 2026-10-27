@@ -519,9 +519,13 @@
                     var s = config.Stations.find(function (x) { return x.Id === id; });
                     if (!s || !confirm('Delete "' + label(s) + '"?')) return;
                     config.Stations = config.Stations.filter(function (x) { return x.Id !== id; });
-                    // Its saved sign-in goes with it (the sidecar keeps sign-ins through syncs).
-                    if (logins[id]) api('DELETE', 'Stations/' + encodeURIComponent(id) + '/Login').then(refreshLogins, function () { });
                     save();
+                    // Its saved sign-in goes with it. (The sidecar also drops sign-ins of stations no longer
+                    // sent, but not when no stations are left.)
+                    api('DELETE', 'Stations/' + encodeURIComponent(id) + '/Login').then(function (r) {
+                        if (r.ok) { delete logins[id]; return; }
+                        if (logins[id]) Dashboard.alert('The station\'s saved sign-in could not be removed (' + r.error + ').');
+                    }, function () { });
                 }
 
                 page.addEventListener('pageshow', load);

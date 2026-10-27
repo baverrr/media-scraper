@@ -218,8 +218,7 @@
       "url": "https://www.tbnplus.com/p/wUwJ86KF",
       "enabled": false,
       "note": "TBN's live stream on TBN+ needs a signed-in account, and TBN+ signs in with an emailed code behind a CAPTCHA, which the sidecar can't do for you.",
-      "signInUrl": "https://www.tbnplus.com/login",
-      "signUpUrl": "https://www.tbnplus.com/login"
+      "signInUrl": "https://www.tbnplus.com/login"
     },
     {
       "id": "krmt",

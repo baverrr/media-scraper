@@ -66,6 +66,10 @@ app.cache.resolveFn = async station => {
 };
 
 const server = http.createServer(app.handler);
+// Players fetch a segment every few seconds on one connection; Node's default 5 s idle timeout
+// closes it between requests, and ffmpeg logs each close as an error.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
 
 // Keep streams for stations airing local games resolved ahead of time.
 const warmer = setInterval(() => { app.warmSports().catch(e => log.warn(`sports warm-up: ${e.message}`)); }, 60_000);

@@ -15,9 +15,12 @@ const WRAP = 2 ** 33; // PTS, DTS and PCR base are 33-bit
 // A live media playlist for the time `nowMs`, of segments `seconds` long. `segmentUrl(i)` gives the
 // address of segment i.
 export function loopPlaylist(nowMs, seconds, segmentUrl) {
-  const seq = Math.floor(nowMs / 1000 / seconds);
+  // The window ends WINDOW segments past now and starts as far before it, so a player that starts
+  // WINDOW from the end begins now, and one that falls behind has that long before its segments expire.
+  const now = Math.floor(nowMs / 1000 / seconds);
+  const seq = Math.max(0, now - WINDOW);
   const lines = ['#EXTM3U', '#EXT-X-VERSION:3', `#EXT-X-TARGETDURATION:${seconds}`, `#EXT-X-MEDIA-SEQUENCE:${seq}`];
-  for (let i = seq; i < seq + WINDOW; i++) lines.push(`#EXTINF:${seconds}.000,`, segmentUrl(i));
+  for (let i = seq; i < now + WINDOW; i++) lines.push(`#EXTINF:${seconds}.000,`, segmentUrl(i));
   return lines.join('\n') + '\n';
 }
 
@@ -43,14 +46,18 @@ function shiftPcr(buf, o, add) {
   buf[o + 4] = (v & 1) << 7 | (buf[o + 4] & 0x7f);
 }
 
-// Copy of an MPEG-TS buffer with every PCR, PTS and DTS moved on by `add` ticks (90 kHz).
-export function shiftTs(src, add) {
+// Copy of an MPEG-TS buffer with every PCR, PTS and DTS moved on by `add` ticks (90 kHz), and each
+// PID's continuity counter moved on by ccAdd[pid] (so a repeat carries on from the last pass instead
+// of starting the counters over, which players report as corrupt packets).
+export function shiftTs(src, add, ccAdd = null) {
   const buf = Buffer.from(src);
-  if (!add) return buf;
+  if (!add && !ccAdd) return buf;
   for (let p = 0; p + 188 <= buf.length; p += 188) {
     if (buf[p] !== 0x47) continue;
     const start = buf[p + 1] & 0x40;
     const afc = buf[p + 3] >> 4 & 0x3;
+    const pid = (buf[p + 1] & 0x1f) << 8 | buf[p + 2];
+    if (ccAdd?.[pid] && afc & 0x1) buf[p + 3] = (buf[p + 3] & 0xf0) | ((buf[p + 3] & 0x0f) + ccAdd[pid]) % 16;
     let o = p + 4;
     if (afc & 0x2) { // adaptation field
       const len = buf[o];
@@ -80,8 +87,29 @@ export function loopSegment(clips, seconds, i) {
   const pass = clips.length * seconds * 90_000;
   // The offset comes round again after WRAP / gcd(pass, WRAP) repeats; reducing the repeat count by that
   // first keeps the product exact for any i.
-  const repeats = Math.floor(i / clips.length) % (WRAP / gcdPow2(pass));
-  return shiftTs(clips[i % clips.length], repeats * pass % WRAP);
+  const loops = Math.floor(i / clips.length);
+  const repeats = loops % (WRAP / gcdPow2(pass));
+  const perPass = payloadPackets(clips);
+  const ccAdd = {};
+  for (const [pid, n] of Object.entries(perPass)) ccAdd[pid] = (loops % 16) * n % 16;
+  return shiftTs(clips[i % clips.length], repeats * pass % WRAP, ccAdd);
+}
+
+// Packets carrying a payload, per PID, in one pass of the clips: how far each continuity counter
+// moves per pass.
+const counted = new WeakMap();
+function payloadPackets(clips) {
+  if (counted.has(clips)) return counted.get(clips);
+  const n = {};
+  for (const clip of clips) {
+    for (let p = 0; p + 188 <= clip.length; p += 188) {
+      if (clip[p] !== 0x47 || !(clip[p + 3] >> 4 & 0x1)) continue;
+      const pid = (clip[p + 1] & 0x1f) << 8 | clip[p + 2];
+      n[pid] = (n[pid] || 0) + 1;
+    }
+  }
+  counted.set(clips, n);
+  return n;
 }
 
 // The Local Sports off-air card: ten 6-second segments.
