@@ -337,7 +337,8 @@ test('a station with nothing to play gets the looping slate, an upstream failure
     assert.equal(text, slatePlaylist(t, n => `../slate/${n}.ts`));
     const seq = Math.floor(t / (SLATE_SECONDS * 1000));
     assert.match(text, new RegExp(`#EXT-X-MEDIA-SEQUENCE:${seq}\\n`));
-    assert.equal(text.match(/#EXT-X-DISCONTINUITY\n/g).length, 3);
+    // Each repeat carries the clock on (slate.js), so there are no discontinuities.
+    assert.doesNotMatch(text, /DISCONTINUITY/);
     // The relative segment URL resolves to the slate clip.
     res = await fetch(new URL(`../slate/${seq}.ts`, `${url}/stream/test.m3u8`));
     assert.equal(res.status, 200);

@@ -8,6 +8,7 @@ import { buildM3u, buildXmltv, sportsChannel, SPORTS_ID } from './guide.js';
 import { createSigner } from './sign.js';
 import { normalizeLogin } from './logins.js';
 import { isHls, isMaster, rewriteMaster, rewriteMedia, chosenVariantUrl, renditionUrls, proxyExtension } from './hls.js';
+import { loopPlaylist, loopSegment, offAirClips, OFF_AIR_SECONDS } from './slate.js';
 
 // "Nothing is streaming right now": a 6-second clip (assets/slate.svg encoded with ffmpeg) played in
 // a loop on a station whose page has no stream at the moment, such as one that streams only during
@@ -16,15 +17,8 @@ export const SLATE_SECONDS = 6;
 const SLATE_PATH = new URL('../assets/slate.ts', import.meta.url);
 
 // A live playlist that repeats the slate. The sequence follows the clock, so every reload moves on
-// by the segments that have played; each repeat starts its timestamps over, hence the
-// discontinuities.
-export function slatePlaylist(now, segmentUrl) {
-  const seq = Math.floor(now / (SLATE_SECONDS * 1000));
-  const lines = ['#EXTM3U', '#EXT-X-VERSION:3', `#EXT-X-TARGETDURATION:${SLATE_SECONDS}`,
-    `#EXT-X-MEDIA-SEQUENCE:${seq}`, `#EXT-X-DISCONTINUITY-SEQUENCE:${seq}`];
-  for (let n = seq; n < seq + 3; n++) lines.push('#EXT-X-DISCONTINUITY', `#EXTINF:${SLATE_SECONDS}.000,`, segmentUrl(n));
-  return lines.join('\n') + '\n';
-}
+// by the segments that have played; each repeat's timestamps carry on from the last (slate.js).
+export const slatePlaylist = (now, segmentUrl) => loopPlaylist(now, SLATE_SECONDS, segmentUrl);
 
 // Upstream answers that usually mean the signed URL or session expired: re-resolve once.
 const EXPIRED = new Set([401, 403, 404, 410]);
@@ -395,13 +389,19 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       return send(res, 200, buildXmltv(channels, { hours, games, now: now() }), 'application/xml');
     }
 
-    // Local Sports: the station airing a local game right now (the earliest-started one).
+    // Local Sports: the station airing a local game right now (the earliest-started one), or the
+    // off-air slate, so tuning in between games plays a picture instead of failing.
     if ((m = p.match(/^\/stream\/local-sports(?:\.m3u8)?$/)) && (method === 'GET' || method === 'HEAD')) {
       if (!sportsOn()) throw new HttpError(404, 'local sports are turned off');
       const { onAir } = await sportsState();
-      if (!onAir.length) throw new HttpError(503, 'No local game is on the air right now');
+      if (!onAir.length) return send(res, 200, loopPlaylist(now(), OFF_AIR_SECONDS, n => `../off-air/${n}.ts`), 'application/vnd.apple.mpegurl');
       log.info?.(`[${SPORTS_ID}] -> ${onAir[0].station.id} (${onAir[0].event.shortTitle})`);
       return servePlaylist(req, res, onAir[0].station, { kind: 'root' });
+    }
+    if ((m = p.match(/^\/off-air\/(\d{1,15})\.ts$/)) && (method === 'GET' || method === 'HEAD')) {
+      const body = loopSegment(offAirClips(), OFF_AIR_SECONDS, Number(m[1]));
+      res.writeHead(200, { 'content-type': 'video/mp2t', 'content-length': body.length, 'cache-control': 'public, max-age=86400' });
+      return res.end(method === 'HEAD' ? undefined : body);
     }
 
     if ((m = p.match(/^\/stream\/([^/]+?)(?:\.m3u8)?$/)) && (method === 'GET' || method === 'HEAD')) {
@@ -417,8 +417,8 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       return serveSegment(req, res, stationOr404(decodeURIComponent(m[1])), Buffer.from(m[3], 'base64url').toString(), m[2]);
     }
 
-    if (/^\/slate\/\d+\.ts$/.test(p) && (method === 'GET' || method === 'HEAD')) {
-      const body = slateBytes();
+    if ((m = p.match(/^\/slate\/(\d{1,15})\.ts$/)) && (method === 'GET' || method === 'HEAD')) {
+      const body = loopSegment([slateBytes()], SLATE_SECONDS, Number(m[1]));
       res.writeHead(200, { 'content-type': 'video/mp2t', 'content-length': body.length, 'cache-control': 'public, max-age=86400' });
       return res.end(method === 'HEAD' ? undefined : body);
     }

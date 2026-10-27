@@ -69,6 +69,9 @@ While a game is on (from 15 minutes before the start):
 - that station moves to the top of the channel list, and its stream is fetched shortly before the start so tuning in is instant;
 - the guide shows the game in the *Sports* category, so it appears in Jellyfin's Sports row, on that station and on Local Sports.
 
+Between games, Local Sports plays a "No local game on the air" card instead of failing. To watch a game that starts while
+you're on that card, tune in again.
+
 An honest caveat: stations' web streams often show their own news instead of network games, because networks and leagues rarely allow games on station websites. The guide description says so.
 
 ### Coverage area
