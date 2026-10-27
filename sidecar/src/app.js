@@ -1,11 +1,29 @@
 // HTTP API, M3U/XMLTV feeds and the HLS proxy. Kept separate from server.js so tests can run it
 // with a fake resolver.
+import { readFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { timingSafeEqual } from 'node:crypto';
 import { buildM3u, buildXmltv, sportsChannel, SPORTS_ID } from './guide.js';
 import { createSigner } from './sign.js';
 import { isHls, isMaster, rewriteMaster, rewriteMedia, chosenVariantUrl, renditionUrls, proxyExtension } from './hls.js';
+
+// "Nothing is streaming right now": a 6-second clip (assets/slate.svg encoded with ffmpeg) played in
+// a loop on a station whose page has no stream at the moment, such as one that streams only during
+// its newscasts, so tuning in shows why instead of a playback error.
+export const SLATE_SECONDS = 6;
+const SLATE_PATH = new URL('../assets/slate.ts', import.meta.url);
+
+// A live playlist that repeats the slate. The sequence follows the clock, so every reload moves on
+// by the segments that have played; each repeat starts its timestamps over, hence the
+// discontinuities.
+export function slatePlaylist(now, segmentUrl) {
+  const seq = Math.floor(now / (SLATE_SECONDS * 1000));
+  const lines = ['#EXTM3U', '#EXT-X-VERSION:3', `#EXT-X-TARGETDURATION:${SLATE_SECONDS}`,
+    `#EXT-X-MEDIA-SEQUENCE:${seq}`, `#EXT-X-DISCONTINUITY-SEQUENCE:${seq}`];
+  for (let n = seq; n < seq + 3; n++) lines.push('#EXT-X-DISCONTINUITY', `#EXTINF:${SLATE_SECONDS}.000,`, segmentUrl(n));
+  return lines.join('\n') + '\n';
+}
 
 // Upstream answers that usually mean the signed URL or session expired: re-resolve once.
 const EXPIRED = new Set([401, 403, 404, 410]);
@@ -256,8 +274,21 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
   // /hls/<id>/v.m3u8, renditions /hls/<id>/r/<n>.m3u8.
   const stationDir = (id, which) => (which.kind === 'root' ? `../hls/${id}/` : which.kind === 'rendition' ? '../' : '');
 
+  let slate = null;
+  const slateBytes = () => (slate ??= readFileSync(config.slatePath || SLATE_PATH));
+
   async function servePlaylist(req, res, station, which) {
-    const pl = await loadPlaylist(station, which);
+    let pl;
+    try {
+      pl = await loadPlaylist(station, which);
+    } catch (e) {
+      // The station's page had nothing to play (a resolver failure, not an upstream error on a
+      // stream that was found): play the slate. Retuning tries the page again once the failure
+      // has been remembered for its minute.
+      if (which.kind !== 'root' || e instanceof HttpError || !e.details || config.slate === false) throw e;
+      log.info?.(`[${station.id}] nothing to play (${e.message}); playing the slate`);
+      return send(res, 200, slatePlaylist(now(), n => `../slate/${n}.ts`), 'application/vnd.apple.mpegurl');
+    }
     if (pl.redirect) {
       res.writeHead(302, { location: pl.redirect, 'cache-control': 'no-store' });
       return res.end();
@@ -349,6 +380,12 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
     }
     if ((m = p.match(/^\/hls\/([^/]+)\/s\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)\.[a-z0-9]{1,8}$/)) && (method === 'GET' || method === 'HEAD')) {
       return serveSegment(req, res, stationOr404(decodeURIComponent(m[1])), Buffer.from(m[3], 'base64url').toString(), m[2]);
+    }
+
+    if (/^\/slate\/\d+\.ts$/.test(p) && (method === 'GET' || method === 'HEAD')) {
+      const body = slateBytes();
+      res.writeHead(200, { 'content-type': 'video/mp2t', 'content-length': body.length, 'cache-control': 'public, max-age=86400' });
+      return res.end(method === 'HEAD' ? undefined : body);
     }
 
     if (method === 'GET' && p === '/api/stations') return send(res, 200, store.stations);

@@ -38,6 +38,7 @@ RUN npm ci --omit=dev --no-audit --no-fund
 RUN if [ "${TARGETARCH:-amd64}" = amd64 ]; then npx playwright install --with-deps chrome && rm -rf /var/lib/apt/lists/*; fi
 COPY sidecar/src ./src
 COPY sidecar/markets ./markets
+COPY sidecar/assets ./assets
 COPY media-scraper.js ./
 
 RUN mkdir -p /data && chown pwuser:pwuser /data

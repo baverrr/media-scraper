@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101a33"/>
+      <stop offset="1" stop-color="#2a1252"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#aa5cc3"/>
+      <stop offset="1" stop-color="#00a4dc"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#sky)"/>
+  <g fill="none" stroke="url(#wave)" stroke-linecap="round" stroke-width="10" opacity=".35">
+    <path d="M675 150 a56 56 0 0 1 0 80"/><path d="M703 122 a96 96 0 0 1 0 136"/>
+    <path d="M605 150 a56 56 0 0 0 0 80"/><path d="M577 122 a96 96 0 0 0 0 136"/>
+  </g>
+  <g fill="none" stroke="#e6edf3" stroke-opacity=".55" stroke-width="9" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M640 200 L600 330 M640 200 L680 330 M612 290 L668 290 M624 250 L656 250"/>
+  </g>
+  <circle cx="640" cy="190" r="15" fill="#00a4dc" fill-opacity=".6"/>
+  <text x="640" y="420" fill="#ffffff" font-family="DejaVu Sans, sans-serif" font-size="52" font-weight="700" text-anchor="middle">Nothing is streaming right now</text>
+  <text x="640" y="480" fill="#b7c3d6" font-family="DejaVu Sans, sans-serif" font-size="30" text-anchor="middle">Some stations stream only during their newscasts.</text>
+  <text x="640" y="524" fill="#b7c3d6" font-family="DejaVu Sans, sans-serif" font-size="30" text-anchor="middle">Tune in again later.</text>
+</svg>

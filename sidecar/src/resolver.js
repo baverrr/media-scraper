@@ -25,6 +25,12 @@ const PLAY_SELECTORS = [
 
 const EMBED_PROVIDERS = /youtube|twitch|kick|vimeo|dailymotion|facebook|rumble/i;
 
+const BOT_CHECK_TEXT = /press (?:&|and) hold|verify (?:that )?you are (?:a )?human|are you a robot|confirm you are a human|access to this page has been denied|checking your browser|captcha/i;
+
+export function isBotCheck(status, text) {
+  return BOT_CHECK_TEXT.test(text || '') && (status === 403 || status === 429 || status === 503 || text.length < 1500);
+}
+
 export class ResolveError extends Error {
   constructor(message, details = {}) {
     super(message);
@@ -122,7 +128,7 @@ export class Resolver {
       });
 
       const page = await context.newPage();
-      await page.goto(station.url, { waitUntil: 'domcontentloaded', timeout: this.pageTimeoutMs });
+      const response = await page.goto(station.url, { waitUntil: 'domcontentloaded', timeout: this.pageTimeoutMs });
 
       // Wait for the player to request a manifest; nudge it with a play click if it doesn't.
       const deadline = Date.now() + this.waitMs;
@@ -192,7 +198,11 @@ export class Resolver {
       }
 
       const drmOnly = candidates.length > 0 && candidates.some(c => c.probe?.drm) && !candidates.some(c => c.probe?.ok);
-      throw new ResolveError(drmOnly ? 'The station\'s stream is DRM-protected; Jellyfin can\'t play it' : 'No live stream found on the page', {
+      const botCheck = !candidates.length && await this.showsBotCheck(page, response);
+      const message = drmOnly ? 'The station\'s stream is DRM-protected; Jellyfin can\'t play it'
+        : botCheck ? 'The station\'s site shows a bot check instead of the page; the sidecar doesn\'t get around bot checks'
+          : 'No live stream found on the page';
+      throw new ResolveError(message, {
         candidates: candidates.map(c => ({ url: c.url, sources: c.sources, paired: !!c.paired, probe: c.probe })),
         embeds,
         tookMs: Date.now() - started,
@@ -220,6 +230,14 @@ export class Resolver {
       if (viaYtDlp) return { ...viaYtDlp, via: 'manual URL (yt-dlp)', resolvedAt: Date.now(), tookMs: Date.now() - started };
     }
     throw new ResolveError(`Manual stream URL is not a live stream: ${probe.ok ? 'not live' : probe.error}`, { probe, tookMs: Date.now() - started });
+  }
+
+  // Only names the failure: a page answered with a challenge ("press and hold", a CAPTCHA) rather
+  // than its content.
+  async showsBotCheck(page, response) {
+    let text = '';
+    try { text = await page.evaluate(() => `${document.title} ${document.body?.innerText.slice(0, 2000) ?? ''}`); } catch { /* closed */ }
+    return isBotCheck(response?.status(), text);
   }
 
   async pressPlay(page) {

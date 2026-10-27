@@ -121,3 +121,11 @@ test('pick: Google DAI live streams are the programme, not ads, and avoid the ad
   const best = pickBest([{ url: unblockedStreamUrl(dai), type: 'hls', sources: ['network'], probe: { ok: true, live: true, master: true } }]);
   assert.ok(best);
 });
+
+test('bot-check pages are named as such; ordinary pages mentioning a CAPTCHA are not', async () => {
+  const { isBotCheck } = await import('../src/resolver.js');
+  assert.equal(isBotCheck(403, 'Access to this page has been denied Before we continue... Press & Hold to confirm you are a human (and not a bot).'), true);
+  assert.equal(isBotCheck(200, 'Just a moment... Checking your browser before accessing the site.'), true);
+  assert.equal(isBotCheck(200, `Contact us (this form uses reCAPTCHA). ${'News story. '.repeat(200)}`), false);
+  assert.equal(isBotCheck(404, 'Page not found'), false);
+});

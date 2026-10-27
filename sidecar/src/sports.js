@@ -90,10 +90,14 @@ export function matchEvents(events, stations) {
 }
 
 export class SportsSchedule {
-  constructor({ teams = [], fetchImpl = fetch, ttlMs = 30 * 60_000, now = Date.now, log = {} } = {}) {
+  // retryMs: after a failed fetch (ESPN or the network down, as right after a reboot), how soon to
+  // try again; it doubles with each failure in a row, up to ttlMs.
+  constructor({ teams = [], fetchImpl = fetch, ttlMs = 30 * 60_000, retryMs = 60_000, now = Date.now, log = {} } = {}) {
     this.teams = teams;
     this.fetchImpl = fetchImpl;
     this.ttlMs = ttlMs;
+    this.retryMs = retryMs;
+    this.failures = 0;
     this.now = now;
     this.log = log;
     this.cache = null; // { at, events }
@@ -106,15 +110,17 @@ export class SportsSchedule {
     this.teams = teams;
     this.cache = null;
     this.pending = null;
+    this.failures = 0;
     this.generation++;
   }
 
   async events() {
-    if (this.cache && this.now() - this.cache.at < this.ttlMs) return this.cache.events;
+    if (this.cache && this.now() < this.cache.until) return this.cache.events;
     if (this.pending) return this.pending;
     const generation = this.generation;
     const teams = this.teams;
     const pending = (async () => {
+      let failed = false;
       const results = await Promise.all(teams.map(async team => {
         const league = LEAGUES[team.league];
         if (!league) return [];
@@ -124,6 +130,7 @@ export class SportsSchedule {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           return parseSchedule(await res.json(), team);
         } catch (e) {
+          failed = true;
           this.log.warn?.(`sports: ${team.name || team.team} schedule unavailable: ${e.message}`);
           // Keep the previous events for this team rather than dropping its games.
           return (this.cache?.events || []).filter(ev => ev.league === team.league && ev.team === (team.name || team.team));
@@ -131,7 +138,9 @@ export class SportsSchedule {
       }));
       const events = results.flat();
       if (generation !== this.generation) return this.events(); // teams changed meanwhile
-      this.cache = { at: this.now(), events };
+      this.failures = failed ? this.failures + 1 : 0;
+      const wait = failed ? Math.min(this.retryMs * 2 ** (this.failures - 1), this.ttlMs) : this.ttlMs;
+      this.cache = { until: this.now() + wait, events };
       return events;
     })().finally(() => { if (this.pending === pending) this.pending = null; });
     this.pending = pending;
