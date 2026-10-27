@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+  <title>Local Broadcast</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101a33"/>
+      <stop offset="1" stop-color="#2a1252"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="640" cy="250" r="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00a4dc" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#00a4dc" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#aa5cc3"/>
+      <stop offset="1" stop-color="#00a4dc"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#sky)"/>
+  <rect width="1280" height="720" fill="url(#glow)"/>
+  <!-- coverage area on the ground -->
+  <ellipse cx="640" cy="580" rx="420" ry="70" fill="#00a4dc" fill-opacity=".08" stroke="url(#wave)" stroke-width="5" stroke-dasharray="18 14"/>
+  <ellipse cx="640" cy="580" rx="250" ry="40" fill="none" stroke="#ffffff" stroke-opacity=".18" stroke-width="3"/>
+  <g fill="#e6edf3">
+    <circle cx="410" cy="600" r="9"/><circle cx="880" cy="556" r="9"/><circle cx="960" cy="612" r="9"/><circle cx="330" cy="560" r="9"/>
+  </g>
+  <!-- signal -->
+  <g fill="none" stroke="url(#wave)" stroke-linecap="round" stroke-width="16">
+    <path d="M705 175 a92 92 0 0 1 0 130" opacity=".95"/>
+    <path d="M750 130 a155 155 0 0 1 0 220" opacity=".7"/>
+    <path d="M795 85 a218 218 0 0 1 0 310" opacity=".45"/>
+    <path d="M575 175 a92 92 0 0 0 0 130" opacity=".95"/>
+    <path d="M530 130 a155 155 0 0 0 0 220" opacity=".7"/>
+    <path d="M485 85 a218 218 0 0 0 0 310" opacity=".45"/>
+  </g>
+  <!-- tower -->
+  <g fill="none" stroke="#e6edf3" stroke-width="14" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M640 262 L572 580 M640 262 L708 580"/>
+    <path d="M601 444 L679 444 M587 512 L693 512 M614 384 L666 384"/>
+    <path d="M614 384 L679 444 L587 512 M666 384 L601 444 L693 512"/>
+  </g>
+  <circle cx="640" cy="240" r="30" fill="#00a4dc"/>
+  <circle cx="640" cy="240" r="13" fill="#ffffff"/>
+</svg>
