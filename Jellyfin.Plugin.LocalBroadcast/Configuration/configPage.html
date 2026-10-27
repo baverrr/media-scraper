@@ -71,6 +71,26 @@
                     <div id="lbGames" class="fieldDescription" style="margin-top:.5em;white-space:pre-line;" aria-live="polite"></div>
                 </form>
 
+                <h3 class="sectionTitle" style="margin-top:2em;">Coverage area</h3>
+                <form id="lbCoverageForm">
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="lbMaxDistance" label="Maximum distance (miles)" min="0" step="1" placeholder="0" />
+                        <div class="fieldDescription">Enabled stations farther than this from your location stay out of Live TV. 0 or empty: no limit. Stations without a location are always included.</div>
+                    </div>
+                    <div style="display:flex;gap:.5em;flex-wrap:wrap;align-items:flex-end;">
+                        <div class="inputContainer" style="flex:1 1 10em;margin:0;">
+                            <input is="emby-input" type="number" id="lbHomeLat" label="Your latitude" step="any" min="-90" max="90" />
+                        </div>
+                        <div class="inputContainer" style="flex:1 1 10em;margin:0;">
+                            <input is="emby-input" type="number" id="lbHomeLon" label="Your longitude" step="any" min="-180" max="180" />
+                        </div>
+                        <button is="emby-button" type="button" class="raised emby-button" id="lbLocate"><span>Use this device's location</span></button>
+                    </div>
+                    <div class="fieldDescription">Empty: the market's center. Distances are to each station's city.</div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button" style="margin-top:1em;"><span>Save coverage area</span></button>
+                    <div id="lbCoverage" class="fieldDescription" style="margin-top:.5em;" aria-live="polite"></div>
+                </form>
+
                 <h3 class="sectionTitle" style="margin-top:2em;">Stations</h3>
                 <form id="lbStationForm">
                     <input type="hidden" id="lbEditId" />
@@ -102,6 +122,18 @@
                     <div class="inputContainer">
                         <input is="emby-input" type="url" id="lbLogo" label="Logo URL (optional)" />
                     </div>
+                    <div style="display:flex;gap:.5em;flex-wrap:wrap;">
+                        <div class="inputContainer" style="flex:2 1 12em;">
+                            <input is="emby-input" type="text" id="lbCity" label="City (optional)" placeholder="Denver, CO" />
+                        </div>
+                        <div class="inputContainer" style="flex:1 1 8em;">
+                            <input is="emby-input" type="number" id="lbLat" label="Latitude (optional)" step="any" min="-90" max="90" />
+                        </div>
+                        <div class="inputContainer" style="flex:1 1 8em;">
+                            <input is="emby-input" type="number" id="lbLon" label="Longitude (optional)" step="any" min="-180" max="180" />
+                        </div>
+                    </div>
+                    <div class="fieldDescription" style="margin-top:-1em;margin-bottom:1em;">The station's location, for the coverage area. Without one the station is always included.</div>
                     <button is="emby-button" type="submit" class="raised button-submit block emby-button" id="lbSubmit"><span>Add station</span></button>
                     <button is="emby-button" type="button" class="raised block emby-button hide" id="lbCancel"><span>Cancel edit</span></button>
                 </form>
@@ -125,6 +157,7 @@
                 var config = { Stations: [], Teams: [] };
                 var status = {};
                 var airing = {};
+                var center = null;
 
                 function $(id) { return page.querySelector('#' + id); }
 
@@ -153,9 +186,44 @@
                     el.style.color = ok === true ? '#4caf50' : ok === false ? '#f44336' : '';
                 }
 
+                // Number from an input; null when empty or not a number.
+                function num(id) {
+                    var v = $(id).value.trim();
+                    return v === '' || isNaN(Number(v)) ? null : Number(v);
+                }
+
+                function home() {
+                    if (config.HomeLatitude != null && config.HomeLongitude != null) return { lat: config.HomeLatitude, lon: config.HomeLongitude, city: null };
+                    return center;
+                }
+
+                // Great-circle miles, as the plugin computes them.
+                function miles(s) {
+                    var h = home();
+                    if (!h || s.Latitude == null || s.Longitude == null) return null;
+                    var rad = function (d) { return d * Math.PI / 180; };
+                    var a = Math.pow(Math.sin(rad(s.Latitude - h.lat) / 2), 2) + Math.cos(rad(h.lat)) * Math.cos(rad(s.Latitude)) * Math.pow(Math.sin(rad(s.Longitude - h.lon) / 2), 2);
+                    return 2 * 3958.8 * Math.asin(Math.min(1, Math.sqrt(a)));
+                }
+
+                function inRange(s) {
+                    var d = miles(s);
+                    return !(config.MaxDistanceMiles > 0) || d === null || d <= config.MaxDistanceMiles;
+                }
+
+                function renderCoverage() {
+                    var h = home();
+                    var enabled = config.Stations.filter(function (s) { return s.Enabled; });
+                    var from = h ? (h.city || h.lat.toFixed(3) + ', ' + h.lon.toFixed(3)) : 'an unknown location';
+                    setLine($('lbCoverage'), config.MaxDistanceMiles > 0
+                        ? enabled.filter(inRange).length + ' of ' + enabled.length + ' enabled stations are within ' + config.MaxDistanceMiles + ' miles of ' + from + '.'
+                        : 'No distance limit: all ' + enabled.length + ' enabled stations are included (distances from ' + from + ').', null);
+                }
+
                 function describeState(s) {
                     var st = status[s.Id];
                     if (!s.Enabled) return [s.Note ? 'Disabled: ' + s.Note : 'Disabled.', null];
+                    if (!inRange(s)) return ['Outside your ' + config.MaxDistanceMiles + '-mile coverage area, so not in Live TV.', null];
                     if (!st || st.state === 'idle') return ['Not resolved yet (resolves when first played).', null];
                     if (st.state === 'resolving') return ['Resolving...', null];
                     if (st.state === 'failed') return ['Last attempt failed: ' + st.error, false];
@@ -197,8 +265,10 @@
                     list.innerHTML = '';
                     $('lbEmpty').classList.toggle('hide', config.Stations.length > 0);
                     config.Stations.forEach(function (s) {
-                        var title = label(s) + (s.Network ? '  -  ' + s.Network : '') + (airing[s.Id] ? '  -  ON NOW: ' + airing[s.Id] : '');
-                        var r = textRow([title, s.StreamUrl ? s.Url + '  (stream: ' + s.StreamUrl + ')' : s.Url, ''], [], !s.Enabled);
+                        var d0 = miles(s);
+                        var where = (s.City || '') + (d0 !== null ? (s.City ? ', ' : '') + Math.round(d0) + ' mi' : '');
+                        var title = label(s) + (s.Network ? '  -  ' + s.Network : '') + (where ? '  -  ' + where : '') + (airing[s.Id] ? '  -  ON NOW: ' + airing[s.Id] : '');
+                        var r = textRow([title, s.StreamUrl ? s.Url + '  (stream: ' + s.StreamUrl + ')' : s.Url, ''], [], !s.Enabled || !inRange(s));
                         var d = describeState(s);
                         setLine(r.lines[2], d[0], d[1]);
                         r.lines[2].setAttribute('aria-live', 'polite');
@@ -211,6 +281,8 @@
                         r.row.appendChild(iconButton('delete', 'Delete', function () { remove(s.Id); }));
                         list.appendChild(r.row);
                     });
+
+                    renderCoverage();
 
                     var teams = $('lbTeams');
                     teams.innerHTML = '';
@@ -274,8 +346,12 @@
                         $('lbManageLiveTv').checked = config.ManageLiveTv !== false;
                         $('lbSportsEnabled').checked = config.SportsEnabled !== false;
                         $('lbSportsChannel').value = config.SportsChannel || '1.1';
+                        $('lbMaxDistance').value = config.MaxDistanceMiles > 0 ? config.MaxDistanceMiles : '';
+                        $('lbHomeLat').value = config.HomeLatitude != null ? config.HomeLatitude : '';
+                        $('lbHomeLon').value = config.HomeLongitude != null ? config.HomeLongitude : '';
                         render();
                         Dashboard.hideLoadingMsg();
+                        loadCenter();
                         refreshStatus();
                         api('GET', 'Markets').then(function (markets) {
                             var sel = $('lbMarket');
@@ -289,6 +365,15 @@
                             sel.value = config.Market || 'denver';
                         });
                     });
+                }
+
+                function loadCenter() {
+                    center = null;
+                    api('GET', 'Markets/' + encodeURIComponent(config.Market || 'denver')).then(function (m) {
+                        var c = m.Center || m.center;
+                        if (c) center = { lat: c.Latitude != null ? c.Latitude : c.latitude, lon: c.Longitude != null ? c.Longitude : c.longitude, city: c.City || c.city };
+                        render();
+                    }, function () { render(); });
                 }
 
                 // Resolves to whether the settings were saved.
@@ -339,6 +424,9 @@
                     $('lbStreamUrl').value = s.StreamUrl || '';
                     $('lbAliases').value = s.SportsAliases || '';
                     $('lbLogo').value = s.Logo || '';
+                    $('lbCity').value = s.City || '';
+                    $('lbLat').value = s.Latitude != null ? s.Latitude : '';
+                    $('lbLon').value = s.Longitude != null ? s.Longitude : '';
                     $('lbSubmit').querySelector('span').textContent = 'Save changes';
                     $('lbCancel').classList.remove('hide');
                     $('lbName').focus();
@@ -376,6 +464,36 @@
                     return false;
                 });
 
+                $('lbCoverageForm').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    var lat = num('lbHomeLat'), lon = num('lbHomeLon');
+                    if ((lat === null) !== (lon === null) || (lat !== null && (Math.abs(lat) > 90 || Math.abs(lon) > 180))) {
+                        Dashboard.alert('Enter both a latitude (-90 to 90) and a longitude (-180 to 180), or leave both empty for the market center.');
+                        return false;
+                    }
+                    config.MaxDistanceMiles = Math.max(0, Math.round(num('lbMaxDistance') || 0));
+                    config.HomeLatitude = lat;
+                    config.HomeLongitude = lon;
+                    save();
+                    return false;
+                });
+
+                $('lbLocate').addEventListener('click', function () {
+                    if (!navigator.geolocation) {
+                        Dashboard.alert('This browser cannot share its location. Enter the latitude and longitude instead.');
+                        return;
+                    }
+                    setLine($('lbCoverage'), 'Asking the browser for this device\'s location...', null);
+                    navigator.geolocation.getCurrentPosition(function (pos) {
+                        $('lbHomeLat').value = pos.coords.latitude.toFixed(4);
+                        $('lbHomeLon').value = pos.coords.longitude.toFixed(4);
+                        setLine($('lbCoverage'), 'Location filled in. Save the coverage area to use it.', true);
+                    }, function (err) {
+                        // Browsers only share a location with pages served over HTTPS (or localhost).
+                        setLine($('lbCoverage'), 'Could not get the location (' + err.message + '). Enter the latitude and longitude instead.', false);
+                    }, { timeout: 15000 });
+                });
+
                 $('lbAddTeam').addEventListener('click', function () {
                     var team = $('lbTeamId').value.trim();
                     if (!/^[A-Za-z0-9-]{1,32}$/.test(team)) {
@@ -406,7 +524,7 @@
                         config.Teams = m.Teams || m.teams || [];
                         config.SportsChannel = m.SportsChannel || m.sportsChannel || config.SportsChannel;
                         $('lbSportsChannel').value = config.SportsChannel || '1.1';
-                        save();
+                        save().then(loadCenter);
                     });
                 });
 
@@ -432,6 +550,12 @@
                         return false;
                     }
 
+                    var lat = num('lbLat'), lon = num('lbLon');
+                    if ((lat === null) !== (lon === null) || (lat !== null && (Math.abs(lat) > 90 || Math.abs(lon) > 180))) {
+                        Dashboard.alert('Enter both the station\'s latitude and longitude, or neither.');
+                        return false;
+                    }
+
                     var existing = config.Stations.find(function (x) { return x.Id === id; });
                     var entry = {
                         Id: id,
@@ -443,6 +567,9 @@
                         StreamUrl: streamUrl || null,
                         SportsAliases: $('lbAliases').value.trim() || null,
                         Logo: $('lbLogo').value.trim() || null,
+                        City: $('lbCity').value.trim() || null,
+                        Latitude: lat,
+                        Longitude: lon,
                         Note: existing ? existing.Note : null,
                         // A pasted stream URL turns a station the market file disabled back on.
                         Enabled: existing ? (existing.Enabled || (!!streamUrl && streamUrl !== existing.StreamUrl)) : true
