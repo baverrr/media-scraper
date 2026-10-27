@@ -13,6 +13,7 @@ description: >
   that has the game.
 category: "LiveTV"
 owner: "baverrr"
+imageUrl: "https://raw.githubusercontent.com/baverrr/media-scraper/main/docs/icon.png"
 artifacts:
 - "Jellyfin.Plugin.LocalBroadcast.dll"
 changelog: >

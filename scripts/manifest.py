@@ -40,6 +40,9 @@ entry.update({
     "owner": meta["owner"],
     "category": meta["category"],
 })
+# Jellyfin downloads the image into the plugin's folder at install and shows it on the plugin card.
+if meta.get("imageUrl"):
+    entry["imageUrl"] = meta["imageUrl"]
 entry["versions"] = [v for v in entry["versions"] if v["version"] != meta["version"]]
 entry["versions"].insert(0, {
     "version": meta["version"],
