@@ -31,22 +31,19 @@ It works with Jellyfin 12.2 and needs a small companion Docker container, the *s
 Many local TV stations stream live for free on their websites, but their players need a real browser, and the stream URLs carry tokens that expire. The sidecar handles both:
 
 ```mermaid
-flowchart LR
+flowchart TB
+    C["Jellyfin apps: TV, phone, web"]
     subgraph server["Your server"]
-        direction LR
-        J["Jellyfin<br/>+ Local Broadcast plugin"]
-        S["Sidecar<br/>(Docker)"]
-        B["Headless Chrome<br/>+ media-scraper.js"]
+        J["Jellyfin + Local Broadcast plugin"]
+        S["Sidecar (Docker): headless Chrome + media-scraper.js"]
     end
     W["Station websites"]
     E["ESPN schedules"]
-    C["Jellyfin apps<br/>(TV, phone, web)"]
-
-    J -- "stations, teams" --> S
-    S -- "M3U playlist,<br/>XMLTV guide, streams" --> J
-    S --> B -- "opens live pages,<br/>finds the HLS stream" --> W
-    S -- "team schedules<br/>and TV listings" --> E
     J -- "Live TV" --> C
+    J -- "stations, teams" --> S
+    S -- "playlist, guide, streams" --> J
+    S -- "finds each live stream" --> W
+    S -- "team schedules" --> E
 ```
 
 | Part | What it does |
