@@ -153,10 +153,10 @@ export class LoginStore {
     await this.persist();
   }
 
-  // Test now: let a failed sign-in be tried again, once.
-  allowRetry(id) {
+  // Test now: let a failed sign-in be tried again, once, until `until` (ms).
+  allowRetry(id, until) {
     const entry = this.entries.get(id);
-    if (entry) entry.retry = true;
+    if (entry) entry.retry = until;
   }
 
   // What the API may show: never the password or the session.

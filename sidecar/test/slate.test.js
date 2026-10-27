@@ -25,9 +25,9 @@ function first(buf) {
 
 test('loop playlist slides along the clock with ever-increasing segment numbers and no discontinuities', () => {
   const pl = loopPlaylist(78 * 6000 + 1500, 6, n => `s/${n}.ts`);
-  assert.match(pl, /#EXT-X-MEDIA-SEQUENCE:78\n/);
+  assert.match(pl, /#EXT-X-MEDIA-SEQUENCE:75\n/);
   assert.match(pl, /#EXT-X-TARGETDURATION:6\n/);
-  assert.deepEqual([...pl.matchAll(/^s\/(\d+)\.ts$/gm)].map(x => Number(x[1])), [78, 79, 80]);
+  assert.deepEqual([...pl.matchAll(/^s\/(\d+)\.ts$/gm)].map(x => Number(x[1])), [75, 76, 77, 78, 79, 80]);
   assert.doesNotMatch(pl, /DISCONTINUITY|ENDLIST/);
 });
 
@@ -69,4 +69,29 @@ test('loop segments stay exact for very large segment numbers', () => {
   // and after 2^28 repeats of the 6-second station clip (540,000 ticks = 2^5 x 16,875)
   assert.ok(loopSegment([stationClip], SLATE_SECONDS, 7).equals(loopSegment([stationClip], SLATE_SECONDS, 7 + 2 ** 28)));
   for (const i of [999_999_999_999_999, 2 ** 52]) assert.equal(loopSegment(clips, OFF_AIR_SECONDS, i)[0], 0x47);
+});
+
+test('loops carry each continuity counter on, and the window reaches back as far as ahead', async () => {
+  const { loopSegment, loopPlaylist, offAirClips, OFF_AIR_SECONDS } = await import('../src/slate.js');
+  const clips = offAirClips();
+  const cc = buf => {
+    const last = {};
+    const first = {};
+    for (let p = 0; p + 188 <= buf.length; p += 188) {
+      if (!(buf[p + 3] >> 4 & 1)) continue;
+      const pid = (buf[p + 1] & 0x1f) << 8 | buf[p + 2];
+      first[pid] ??= buf[p + 3] & 0xf;
+      last[pid] = buf[p + 3] & 0xf;
+    }
+    return { first, last };
+  };
+  const n = clips.length;
+  for (const loop of [0, 1, 7]) {
+    const end = cc(loopSegment(clips, OFF_AIR_SECONDS, loop * n + n - 1)).last;
+    const next = cc(loopSegment(clips, OFF_AIR_SECONDS, (loop + 1) * n)).first;
+    for (const pid of Object.keys(next)) assert.equal(next[pid], (end[pid] + 1) % 16, `pid ${pid} after loop ${loop}`);
+  }
+  const pl = loopPlaylist(600_000, 6, i => `${i}.ts`);
+  assert.match(pl, /#EXT-X-MEDIA-SEQUENCE:97\n/);
+  assert.deepEqual(pl.match(/^\d+\.ts$/gm), ['97.ts', '98.ts', '99.ts', '100.ts', '101.ts', '102.ts']);
 });

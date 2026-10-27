@@ -171,16 +171,20 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       username: entry.username,
       password: entry.password,
       session: entry.session,
+      // A session signed in within the last 6 hours: a page without a stream is more likely off the
+      // air than signed out, so it isn't a reason to sign in again.
+      sessionFresh: () => !!entry.signedInAt && now() - Date.parse(entry.signedInAt) < 6 * 3_600_000,
+      retrying: () => !!entry.retry && entry.retry > now(),
       // Why not to sign in now, or null: a failed sign-in waits until it's saved again or tested,
       // and signing in happens at most every 10 minutes, so a player retrying can't lock the
       // account or have the site email a code each time.
       mayAttempt: () => {
         if (!logins.current(station.id, entry)) return 'the sign-in was changed meanwhile';
-        const retry = entry.retry;
-        entry.retry = false;
+        const retry = !!entry.retry && entry.retry > now();
+        entry.retry = 0;
         if (entry.error && !retry) return `the last sign-in failed (${entry.error}); save the sign-in again or use Test now to try again`;
         const last = lastSignIn.get(station.id);
-        if (!retry && last && now() - last < SIGN_IN_GAP_MS) return 'signed in less than 10 minutes ago; waiting before signing in again';
+        if (!retry && last && now() - last < SIGN_IN_GAP_MS) return 'tried to sign in less than 10 minutes ago; waiting before trying again';
         lastSignIn.set(station.id, now());
         return null;
       },
@@ -304,7 +308,8 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
   const stationDir = (id, which) => (which.kind === 'root' ? `../hls/${id}/` : which.kind === 'rendition' ? '../' : '');
 
   let slate = null;
-  const slateBytes = () => (slate ??= readFileSync(config.slatePath || SLATE_PATH));
+  // One clip, looped; the same array each time, so slate.js counts its packets once.
+  const slateClips = () => (slate ??= [readFileSync(config.slatePath || SLATE_PATH)]);
 
   async function servePlaylist(req, res, station, which) {
     let pl;
@@ -418,7 +423,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
     }
 
     if ((m = p.match(/^\/slate\/(\d{1,15})\.ts$/)) && (method === 'GET' || method === 'HEAD')) {
-      const body = loopSegment([slateBytes()], SLATE_SECONDS, Number(m[1]));
+      const body = loopSegment(slateClips(), SLATE_SECONDS, Number(m[1]));
       res.writeHead(200, { 'content-type': 'video/mp2t', 'content-length': body.length, 'cache-control': 'public, max-age=86400' });
       return res.end(method === 'HEAD' ? undefined : body);
     }
@@ -441,9 +446,12 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       let saved;
       try { saved = await store.save(await readJson(req)); } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, e.message); }
       for (const s of saved) if (before.get(s.id) !== JSON.stringify(s)) { cache.invalidate(s.id); masters.delete(s.id); }
-      // A station's sign-in stays when it leaves the list (the plugin removes it when the station
-      // is deleted), so a sync with a partial list can't lose accounts.
       for (const id of before.keys()) if (!store.get(id)) { cache.invalidate(id); masters.delete(id); }
+      // A deleted station's sign-in goes with it. An empty list (a fresh or broken plugin config)
+      // never clears them all.
+      if (logins && saved.length) {
+        for (const id of [...logins.entries.keys()]) if (!store.get(id)) await logins.remove(id);
+      }
       log.info?.(`stations updated: ${saved.length} (${saved.filter(s => s.enabled).length} enabled)`);
       return send(res, 200, saved);
     }
@@ -510,7 +518,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       const station = stationOr404(decodeURIComponent(m[1]), { requireEnabled: false });
       try {
         // Test now is how a person tries a failed sign-in again.
-        logins?.allowRetry(station.id);
+        logins?.allowRetry(station.id, now() + 3 * 60_000);
         // A failed test (an ad slate, a bot check) leaves a stream that's playing alone.
         const r = await cache.get(station, { force: true, keepOnFailure: true });
         return send(res, 200, {

@@ -336,7 +336,7 @@ test('a station with nothing to play gets the looping slate, an upstream failure
     const text = await res.text();
     assert.equal(text, slatePlaylist(t, n => `../slate/${n}.ts`));
     const seq = Math.floor(t / (SLATE_SECONDS * 1000));
-    assert.match(text, new RegExp(`#EXT-X-MEDIA-SEQUENCE:${seq}\\n`));
+    assert.match(text, new RegExp(`#EXT-X-MEDIA-SEQUENCE:${seq - 3}\\n`));
     // Each repeat carries the clock on (slate.js), so there are no discontinuities.
     assert.doesNotMatch(text, /DISCONTINUITY/);
     // The relative segment URL resolves to the slate clip.
@@ -355,10 +355,12 @@ test('a station with nothing to play gets the looping slate, an upstream failure
 });
 
 test('slate playlist moves on with the clock', () => {
-  const a = slatePlaylist(0, n => `${n}.ts`);
-  const b = slatePlaylist(SLATE_SECONDS * 1000, n => `${n}.ts`);
-  assert.match(a, /#EXT-X-MEDIA-SEQUENCE:0\n/);
-  assert.match(b, /#EXT-X-MEDIA-SEQUENCE:1\n/);
-  assert.deepEqual(b.match(/^\d+\.ts$/gm), ['1.ts', '2.ts', '3.ts']);
+  const a = slatePlaylist(10 * SLATE_SECONDS * 1000, n => `${n}.ts`);
+  const b = slatePlaylist(11 * SLATE_SECONDS * 1000, n => `${n}.ts`);
+  assert.match(a, /#EXT-X-MEDIA-SEQUENCE:7\n/);
+  assert.match(b, /#EXT-X-MEDIA-SEQUENCE:8\n/);
+  assert.deepEqual(b.match(/^\d+\.ts$/gm), ['8.ts', '9.ts', '10.ts', '11.ts', '12.ts', '13.ts']);
+  // Near the start of the clock the window just begins at 0.
+  assert.match(slatePlaylist(0, n => `${n}.ts`), /#EXT-X-MEDIA-SEQUENCE:0\n/);
   assert.doesNotMatch(a, /ENDLIST/);
 });

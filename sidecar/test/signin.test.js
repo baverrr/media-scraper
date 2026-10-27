@@ -120,12 +120,20 @@ test('resolver: signs in through the site\'s form, then reuses the session', { t
 
     // A session the site no longer accepts: no stream with it, so the resolver signs in again,
     // but not within 10 minutes of the last sign-in.
+    // With a recent session it reports the page as it is (so an off-air station plays its slate)
+    // and keeps the session; once the session is hours old, it signs in again.
     logins.get('member').session.cookies.find(c => c.name === 'sid').value = 'expired';
-    await assert.rejects(app.cache.get(store.get('member'), { force: true }), /less than 10 minutes/);
-    t += 11 * 60_000;
-    logins.get('member').session = { cookies: [{ name: 'sid', value: 'expired', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' }], origins: [] };
+    await assert.rejects(app.cache.get(store.get('member'), { force: true }), /No live stream found/);
+    assert.equal(logins.get('member').session.cookies.find(c => c.name === 'sid').value, 'expired');
+    t += 7 * 3_600_000;
     await app.cache.get(store.get('member'), { force: true });
     assert.equal(signIns, 2);
+    // Test now signs in again even with a recent session (past the 10-minute gap).
+    logins.get('member').session.cookies.find(c => c.name === 'sid').value = 'expired';
+    t += 11 * 60_000;
+    logins.allowRetry('member', t + 60_000);
+    await app.cache.get(store.get('member'), { force: true });
+    assert.equal(signIns, 3);
 
     // A wrong password is reported as a sign-in failure, not "nothing streaming".
     await logins.set('member', { username: 'viewer@example.com', password: 'wrong' });
@@ -136,8 +144,10 @@ test('resolver: signs in through the site\'s form, then reuses the session', { t
     // A failed sign-in isn't tried again on its own, however long it has been...
     t += 60 * 60_000;
     await assert.rejects(app.cache.get(store.get('member'), { force: true }), /last sign-in failed/);
-    // ...only when tested (or saved again).
-    logins.allowRetry('member');
+    // ...only when tested (or saved again), and only for a few minutes after.
+    logins.allowRetry('member', t - 1);
+    await assert.rejects(app.cache.get(store.get('member'), { force: true }), /last sign-in failed/);
+    logins.allowRetry('member', t + 60_000);
     await assert.rejects(app.cache.get(store.get('member'), { force: true }), /Sign-in: the site didn't accept/);
   } finally {
     await resolver.close();
@@ -313,6 +323,57 @@ test('resolver: the email never goes into a search box, and only terms boxes are
     await assert.rejects(resolver.signUp({ id: 's', signUpUrl: `${base}/join` }, { ...login, acceptTerms: true }), /asks you to tick "I agree to receive offers from partners"/);
   } finally {
     await resolver.close();
+    server.close();
+  }
+});
+
+test('resolver: a field it can\'t type into fails without the typed value; ZIP fields aren\'t sign-in codes', { timeout: 120_000 }, async () => {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    if (req.url === '/locked') return res.end('<!doctype html><form><input type="email" name="email"><input type="password" name="pw" readonly></form>');
+    if (req.url === '/zip') return res.end('<!doctype html><form method="get" action="/home"><input type="email" name="email"><input type="password" name="pw"><button>Log in</button></form>');
+    res.end('<!doctype html><h1>Home</h1><label>Weather <input name="zipcode" placeholder="ZIP code"></label>');
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const resolver = new Resolver({ scraperPath: SCRAPER, ytDlp: '', log: {} });
+  const failures = [];
+  let signedIn = 0;
+  const login = { username: 'viewer@example.com', password: 'secret-value-123', mayAttempt: () => null, failed: async m => { failures.push(m); }, signedIn: async () => { signedIn++; } };
+  try {
+    const browser = await resolver.browser();
+    let context = await browser.newContext();
+    const err = await resolver.signIn(context, { id: 's', url: `${base}/locked` }, login).catch(e => e);
+    await context.close();
+    assert.match(err.message, /couldn't type into the site's password field/);
+    assert.doesNotMatch(err.message + failures.join(' '), /secret-value-123/);
+    context = await browser.newContext();
+    await resolver.signIn(context, { id: 's', url: `${base}/zip` }, login);
+    await context.close();
+    assert.equal(signedIn, 1);
+  } finally {
+    await resolver.close();
+    server.close();
+  }
+});
+
+test('API: a station sync drops sign-ins of stations no longer sent, but an empty list keeps them', async () => {
+  const logins = await new LoginStore({ dataDir: path.join(dir, 'orphans'), key: randomBytes(32) }).load();
+  const store = await new StationStore({ dataDir: path.join(dir, 'orphans-data'), marketsDir: path.join(dir, 'markets'), market: 't' }).load();
+  const app = createApp({ store, resolver: { resolve: async () => { throw new Error('unused'); } }, logins, config: { apiKey: 'secret' }, log: {} });
+  const server = http.createServer(app.handler);
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const put = list => fetch(`http://127.0.0.1:${server.address().port}/api/stations`, { method: 'PUT', headers: { 'x-api-key': 'secret' }, body: JSON.stringify(list) });
+  try {
+    await put([{ id: 'member', url: 'https://example.com/a' }, { id: 'other', url: 'https://example.com/b' }]);
+    await logins.set('member', { username: 'a@example.com', password: 'p' });
+    await logins.set('other', { username: 'b@example.com', password: 'p' });
+    assert.equal((await put([])).status, 200);
+    assert.ok(logins.get('member') && logins.get('other'));
+    await put([{ id: 'member', url: 'https://example.com/a' }]);
+    assert.ok(logins.get('member'));
+    assert.equal(logins.get('other'), null);
+  } finally {
     server.close();
   }
 });
