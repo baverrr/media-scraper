@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright';
 import { probeManifest } from './probe.js';
-import { AD_RE, manifestTypeOf, mergeCandidates, pickBest, pickHeaders } from './pick.js';
+import { DAI_BLOCKED_HOST_RE, isAd, manifestTypeOf, mergeCandidates, pickBest, pickHeaders, unblockedStreamUrl } from './pick.js';
 import { expiryFromUrl } from './hls.js';
 
 const run = promisify(execFile);
@@ -109,11 +109,14 @@ export class Resolver {
       // Runs in every frame, cross-origin player iframes included, before the page's scripts.
       await context.addInitScript({ content: this.scraperSource });
 
+      // The player's ad-insertion stream request goes to the DAI host that DNS ad blockers leave alone.
+      await context.route(DAI_BLOCKED_HOST_RE, route => route.continue({ url: unblockedStreamUrl(route.request().url()) }));
+
       context.on('response', async res => {
         try {
-          const url = res.url();
+          const url = unblockedStreamUrl(res.url());
           const type = manifestTypeOf(url, res.headers()['content-type'] || '');
-          if (!type || AD_RE.test(url)) return;
+          if (!type || isAd(url)) return;
           found.push({ url, type, sources: ['network'], headers: pickHeaders(await res.request().allHeaders()) });
         } catch { /* page closed */ }
       });
@@ -153,7 +156,7 @@ export class Resolver {
       }
 
       const cookies = await context.cookies();
-      const candidates = mergeCandidates(found.filter(c => !AD_RE.test(c.url))).slice(0, 30);
+      const candidates = mergeCandidates(found.map(c => ({ ...c, url: unblockedStreamUrl(c.url) })).filter(c => !isAd(c.url))).slice(0, 30);
       // A few at a time: one by one, unreachable candidates (10 s timeout each) add up to minutes.
       let next = 0;
       const probeNext = async () => {
