@@ -2,6 +2,14 @@
   {
     "versions": [
       {
+        "version": "1.0.4.0",
+        "changelog": "Coverage area: set a maximum distance and your location (or use this device's location) to keep only nearby stations in Live TV; each station's city and distance show in the settings. Stations set up by an earlier version get their locations automatically. KWGN CW2, KDVR FOX31 and KXRM FOX21 stream again (16 stations enabled); use \"Load this market's stations and teams\" to turn them on.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/baverrr/media-scraper/releases/download/v1.0.4/local-broadcast_1.0.4.0.zip",
+        "checksum": "96b924cf32d92d7ca64c4238ead3d883",
+        "timestamp": "2026-10-27T03:15:58Z"
+      },
+      {
         "version": "1.0.3.0",
         "changelog": "Channels added or removed while Jellyfin was down (for example by upgrading the plugin) now show up in Live TV on their own: the first sync after a restart refreshes the guide when the station list changed, instead of waiting for Sync now or the daily guide refresh.",
         "targetAbi": "12.2.0.0",
