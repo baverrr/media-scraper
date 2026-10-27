@@ -90,16 +90,6 @@
       "enabled": true
     },
     {
-      "id": "koaa",
-      "callSign": "KOAA",
-      "name": "News5",
-      "channel": "5.1",
-      "network": "NBC",
-      "url": "https://www.koaa.com/live",
-      "enabled": true,
-      "note": "Colorado Springs / Pueblo."
-    },
-    {
       "id": "krma",
       "callSign": "KRMA",
       "name": "Rocky Mountain PBS",
@@ -128,16 +118,6 @@
       "enabled": true
     },
     {
-      "id": "kktv",
-      "callSign": "KKTV",
-      "name": "KKTV 11 News",
-      "channel": "11.1",
-      "network": "CBS",
-      "url": "https://www.kktv.com/livestream/",
-      "enabled": false,
-      "note": "Colorado Springs. The station player fails in headless browsers."
-    },
-    {
       "id": "kbdi",
       "callSign": "KBDI",
       "name": "PBS12",
@@ -146,16 +126,6 @@
       "url": "https://www.pbs12.org/livestream",
       "enabled": false,
       "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt."
-    },
-    {
-      "id": "krdo",
-      "callSign": "KRDO",
-      "name": "KRDO 13",
-      "channel": "13.1",
-      "network": "ABC",
-      "url": "https://krdo.com/live/",
-      "enabled": false,
-      "note": "Colorado Springs. The page only offers recorded clips."
     },
     {
       "id": "kcec",
@@ -248,6 +218,146 @@
       "url": "https://iontelevision.com/live",
       "enabled": false,
       "note": "ION streams only in its apps and FAST services."
+    },
+    {
+      "id": "koaa",
+      "callSign": "KOAA",
+      "name": "News5",
+      "channel": "5.1",
+      "network": "NBC",
+      "url": "https://www.koaa.com/live",
+      "enabled": true,
+      "note": "Colorado Springs / Pueblo market."
+    },
+    {
+      "id": "kktv",
+      "callSign": "KKTV",
+      "name": "KKTV 11 News",
+      "channel": "11.1",
+      "network": "CBS",
+      "url": "https://www.kktv.com/livestream/",
+      "enabled": true,
+      "note": "Colorado Springs / Pueblo market."
+    },
+    {
+      "id": "krdo",
+      "callSign": "KRDO",
+      "name": "KRDO 13",
+      "channel": "13.1",
+      "network": "ABC",
+      "url": "https://krdo.com/livestream/",
+      "enabled": true,
+      "note": "Colorado Springs / Pueblo market."
+    },
+    {
+      "id": "kxrm",
+      "callSign": "KXRM",
+      "name": "FOX21",
+      "channel": "21.1",
+      "network": "FOX",
+      "url": "https://www.fox21news.com/live/",
+      "enabled": false,
+      "note": "Colorado Springs / Pueblo market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+    },
+    {
+      "id": "kxtu",
+      "callSign": "KXTU",
+      "name": "SOCO CW",
+      "channel": "57.1",
+      "network": "The CW",
+      "url": "https://www.fox21news.com/live/",
+      "enabled": false,
+      "note": "Colorado Springs / Pueblo market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+    },
+    {
+      "id": "kkco",
+      "callSign": "KKCO",
+      "name": "KKCO 11 News",
+      "channel": "11.1",
+      "network": "NBC",
+      "url": "https://www.kkco11news.com/livestream/",
+      "enabled": true,
+      "note": "Grand Junction / Western Slope market."
+    },
+    {
+      "id": "kjct",
+      "callSign": "KJCT",
+      "name": "KJCT News 8",
+      "channel": "8.1",
+      "network": "ABC",
+      "url": "https://www.kjct8.com/livestream/",
+      "enabled": true,
+      "note": "Grand Junction / Western Slope market."
+    },
+    {
+      "id": "krex",
+      "callSign": "KREX",
+      "name": "KREX 5",
+      "channel": "5.1",
+      "network": "CBS",
+      "url": "https://www.westernslopenow.com/live/",
+      "enabled": false,
+      "note": "Grand Junction / Western Slope market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+    },
+    {
+      "id": "kfqx",
+      "callSign": "KFQX",
+      "name": "FOX 4",
+      "channel": "4.1",
+      "network": "FOX",
+      "url": "https://www.westernslopenow.com/live/",
+      "enabled": false,
+      "note": "Grand Junction / Western Slope market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+    },
+    {
+      "id": "kgwn",
+      "callSign": "KGWN",
+      "name": "Wyoming News Now",
+      "channel": "5.1",
+      "network": "CBS",
+      "url": "https://www.wyomingnewsnow.tv/livestream/",
+      "enabled": true,
+      "note": "Cheyenne market. Streams only during its newscasts; outside them the channel has nothing to play."
+    },
+    {
+      "id": "kob",
+      "callSign": "KOB",
+      "name": "KOB 4",
+      "channel": "4.1",
+      "network": "NBC",
+      "url": "https://www.kob.com/live/",
+      "enabled": true,
+      "note": "Albuquerque / Santa Fe market (includes southwest Colorado)."
+    },
+    {
+      "id": "ktel",
+      "callSign": "KTEL",
+      "name": "Telemundo Nuevo Mexico",
+      "channel": "47.1",
+      "network": "Telemundo",
+      "url": "https://www.telemundonuevomexico.com/ver/",
+      "enabled": true,
+      "note": "Albuquerque / Santa Fe market (includes southwest Colorado)."
+    },
+    {
+      "id": "koat",
+      "callSign": "KOAT",
+      "name": "KOAT 7",
+      "channel": "7.1",
+      "network": "ABC",
+      "url": "https://www.koat.com/",
+      "enabled": false,
+      "note": "Albuquerque / Santa Fe market. Hearst stations stream only in their apps."
+    },
+    {
+      "id": "krqe",
+      "callSign": "KRQE",
+      "name": "KRQE 13",
+      "channel": "13.1",
+      "network": "FOX",
+      "url": "https://www.krqe.com/live/",
+      "enabled": false,
+      "note": "Albuquerque / Santa Fe market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
     }
   ]
 }
