@@ -162,10 +162,17 @@ test('app: Local Sports channel leads the playlist and plays the station airing 
     await new Promise(r => server.listen(0, '127.0.0.1', r));
     const base = `http://127.0.0.1:${server.address().port}`;
     try {
-      // Before the game: Local Sports first, stations in configured order, nothing to play.
+      // Before the game: Local Sports first, stations in configured order, the off-air slate.
       let m3u = await (await fetch(`${base}/playlist.m3u`)).text();
       assert.deepEqual([...m3u.matchAll(/tvg-id="([^"]+)"/g)].map(x => x[1]), ['local-sports', 'kusa', 'kcnc', 'ktvd']);
-      assert.equal((await fetch(`${base}/stream/local-sports.m3u8`)).status, 503);
+      const slate = await fetch(`${base}/stream/local-sports.m3u8`);
+      assert.equal(slate.status, 200);
+      const slateSeg = (await slate.text()).match(/^\.\.\/off-air\/\d+\.ts$/m)?.[0];
+      assert.ok(slateSeg);
+      const seg = await fetch(new URL(slateSeg, `${base}/stream/local-sports.m3u8`));
+      assert.equal(seg.headers.get('content-type'), 'video/mp2t');
+      assert.equal(new Uint8Array(await seg.arrayBuffer())[0], 0x47); // MPEG-TS sync byte
+      assert.equal(resolved.length, 0);
 
       // Kick-off: CBS Colorado moves to the front, Local Sports plays it, warm-up pre-resolves it.
       now = T0 - 5 * 60_000;
