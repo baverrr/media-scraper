@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-labelledby="title desc">
+  <title id="title">Local Broadcast for Jellyfin</title>
+  <desc id="desc">A broadcast tower sending signal waves, next to the project name and tagline.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101a33"/>
+      <stop offset="1" stop-color="#24124a"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#aa5cc3"/>
+      <stop offset="1" stop-color="#00a4dc"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="320" rx="20" fill="url(#sky)"/>
+  <g fill="none" stroke="url(#wave)" stroke-linecap="round">
+    <path d="M168 108 a44 44 0 0 1 0 62" stroke-width="7" opacity=".95"/>
+    <path d="M190 88 a74 74 0 0 1 0 102" stroke-width="7" opacity=".75"/>
+    <path d="M212 68 a104 104 0 0 1 0 142" stroke-width="7" opacity=".55"/>
+    <path d="M128 108 a44 44 0 0 0 0 62" stroke-width="7" opacity=".95"/>
+    <path d="M106 88 a74 74 0 0 0 0 102" stroke-width="7" opacity=".75"/>
+    <path d="M84 68 a104 104 0 0 0 0 142" stroke-width="7" opacity=".55"/>
+  </g>
+  <g fill="none" stroke="#e6edf3" stroke-width="6" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M148 150 L118 262 M148 150 L178 262 M127 228 L169 228 M134 202 L162 202 M118 262 L178 262"/>
+  </g>
+  <circle cx="148" cy="139" r="12" fill="#00a4dc"/>
+  <text x="290" y="150" fill="#ffffff" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="64" font-weight="700">Local Broadcast</text>
+  <text x="292" y="196" fill="#b7c3d6" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="28">Your local TV stations in Jellyfin Live TV, local sports first</text>
+  <g font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="600">
+    <rect x="292" y="226" width="150" height="40" rx="20" fill="#ffffff" fill-opacity=".1"/>
+    <text x="367" y="252" fill="#e6edf3" text-anchor="middle">Live TV tuner</text>
+    <rect x="454" y="226" width="146" height="40" rx="20" fill="#ffffff" fill-opacity=".1"/>
+    <text x="527" y="252" fill="#e6edf3" text-anchor="middle">XMLTV guide</text>
+    <rect x="612" y="226" width="146" height="40" rx="20" fill="#ffffff" fill-opacity=".1"/>
+    <text x="685" y="252" fill="#e6edf3" text-anchor="middle">Local sports</text>
+    <rect x="770" y="226" width="180" height="40" rx="20" fill="#ffffff" fill-opacity=".1"/>
+    <text x="860" y="252" fill="#e6edf3" text-anchor="middle">Coverage radius</text>
+  </g>
+</svg>

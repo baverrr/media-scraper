@@ -1,70 +1,94 @@
+<p align="center">
+  <img src="docs/banner.svg" alt="Local Broadcast for Jellyfin: your local TV stations in Jellyfin Live TV, local sports first" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/baverrr/media-scraper/actions/workflows/ci.yml"><img src="https://github.com/baverrr/media-scraper/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/baverrr/media-scraper/releases/latest"><img src="https://img.shields.io/github/v/release/baverrr/media-scraper?label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Jellyfin-12.2-00a4dc" alt="Jellyfin 12.2">
+  <img src="https://img.shields.io/badge/sidecar-amd64%20%7C%20arm64-2496ed" alt="Sidecar image: amd64 and arm64">
+</p>
+
 # Local Broadcast for Jellyfin
 
-**Local Broadcast is a Jellyfin plugin** that adds your local TV stations to Jellyfin's Live TV, using the free live streams on the stations' own websites. Its main feature is **local sports**: when one of your local teams plays on over-the-air TV, a *Local Sports* channel switches to the station airing the game, that station jumps to the top of the channel list, and the game shows in the guide and in Jellyfin's Sports row. See [Local sports first](#local-sports-first).
+**Local Broadcast is a Jellyfin plugin** that adds your local TV stations to Jellyfin's Live TV. It uses the free live streams on the stations' own websites. Its headline feature is **local sports**: when one of your teams is on over-the-air TV, a *Local Sports* channel switches to the station airing the game, and the game shows in the guide.
 
-It works with Jellyfin 12.2 and needs a small companion Docker container (the sidecar). See [Install](#install).
+It works with Jellyfin 12.2 and needs a small companion Docker container, the *sidecar*. This repository also contains **[media-scraper.js](#media-scraperjs)**, the browser script the plugin is built on, which works on its own.
 
-This repository also contains **[media-scraper.js](#media-scraperjs)**, the dependency-free browser script the plugin is built on. It finds media players and streams on any web page and tells you which are live, and works on its own.
+**Contents:** [Features](#features) · [How it works](#how-it-works) · [Local sports](#local-sports-first) · [Coverage area](#coverage-area) · [Install](#install) · [Station support](#station-support) · [Markets](#markets) · [Configuration](#sidecar-configuration) · [Privacy and security](#privacy-and-security) · [media-scraper.js](#media-scraperjs)
+
+## Features
+
+- 📺 **Live TV without a tuner.** Stations appear as Jellyfin Live TV channels with an XMLTV guide. The plugin sets up the tuner and guide itself.
+- 🏈 **Local sports first.** Your teams' games, from ESPN's schedules, put the station airing them at the top, and a *Local Sports* channel always plays the game.
+- 📍 **Coverage area.** Pick how far away stations can be, in miles, from your location or the market's center.
+- 🔄 **Streams that keep working.** Station stream URLs expire within minutes or hours. The sidecar finds fresh ones behind stable channel URLs, with no interruption.
+- 🧪 **Test now.** See exactly what the sidecar finds on a station's page, or why it can't play it.
+- 🛡️ **Private by design.** No telemetry and no accounts; everything runs on your server. See [PRIVACY.md](PRIVACY.md).
 
 ## How it works
 
-Many local TV stations stream live for free on their own websites, but those players need a real browser and their stream URLs carry tokens that expire within minutes or hours. Local Broadcast has two parts:
+Many local TV stations stream live for free on their websites, but their players need a real browser, and the stream URLs carry tokens that expire. The sidecar handles both:
+
+```mermaid
+flowchart LR
+    subgraph server["Your server"]
+        direction LR
+        J["Jellyfin<br/>+ Local Broadcast plugin"]
+        S["Sidecar<br/>(Docker)"]
+        B["Headless Chrome<br/>+ media-scraper.js"]
+    end
+    W["Station websites"]
+    E["ESPN schedules"]
+    C["Jellyfin apps<br/>(TV, phone, web)"]
+
+    J -- "stations, teams" --> S
+    S -- "M3U playlist,<br/>XMLTV guide, streams" --> J
+    S --> B -- "opens live pages,<br/>finds the HLS stream" --> W
+    S -- "team schedules<br/>and TV listings" --> E
+    J -- "Live TV" --> C
+```
 
 | Part | What it does |
 | --- | --- |
-| **Sidecar** (`sidecar/`, Docker image) | Opens each station's live page in headless Chrome with `media-scraper.js` loaded first, finds the live HLS stream, and serves it to Jellyfin through a small proxy that re-resolves expired tokens behind stable URLs. Also serves an M3U playlist and an XMLTV guide. |
-| **Jellyfin plugin** (`Jellyfin.Plugin.LocalBroadcast/`) | Settings page for stations and local teams, pushes them to the sidecar, and adds the sidecar to Live TV as an M3U tuner with an XMLTV guide, so there's nothing to configure under Live TV yourself. |
+| **Jellyfin plugin** (`Jellyfin.Plugin.LocalBroadcast/`) | A settings page for stations, local teams and the coverage area. It sends them to the sidecar and adds the sidecar to Live TV as an M3U tuner with an XMLTV guide, so there's nothing to set up under Live TV yourself. |
+| **Sidecar** (`sidecar/`, Docker image) | Opens each station's live page in headless Chrome with `media-scraper.js` loaded first, and finds the live HLS stream. Serves it to Jellyfin through a small proxy that re-resolves expired tokens behind stable URLs. Also serves the M3U playlist and the XMLTV guide. |
 
 ### Local sports first
 
-This is the plugin's headline feature. Give the plugin your local teams (the Denver market comes with the Broncos, Nuggets, Avalanche, Rockies, Rapids, Denver Summit FC, CU, CSU and Air Force). The sidecar reads each team's schedule and TV listings from ESPN's public API and matches over-the-air broadcasts to your stations by network (a CBS game is on the CBS affiliate), call sign, name or the station's *sports aliases*. While a game is on (from 15 minutes before the start):
+Give the plugin your local teams (each bundled market comes with its area's teams). The sidecar reads each team's schedule and TV listings from ESPN's public API. It matches over-the-air broadcasts to your stations by network (a CBS game is on the CBS affiliate), call sign, name, or the station's *sports aliases*.
 
-- the **Local Sports** channel (number 1.1 by default) plays whichever station is airing the game;
-- that station moves to the top of the playlist and its stream resolves ahead of every other station, pre-fetched shortly before the start so tuning in is instant;
-- the guide shows the game (category *Sports*, so it appears in Jellyfin's Sports row) on that station and on Local Sports, refreshed whenever the schedule changes.
+```mermaid
+flowchart LR
+    A["ESPN: your team<br/>plays at 7:00 on NBC"] --> B["Sidecar matches NBC<br/>to your NBC station"]
+    B --> C["6:45: stream fetched early,<br/>station moves to the top"]
+    C --> D["Local Sports channel<br/>plays that station"]
+    D --> E["Game ends:<br/>back to normal"]
+```
 
-Honest caveat: stations' web streams often show their own news programming instead of network games, because networks and leagues rarely allow games on station websites. The guide description says so.
+While a game is on (from 15 minutes before the start):
 
-### What works (Denver market)
+- the **Local Sports** channel (1.1 by default) plays whichever station is airing the game;
+- that station moves to the top of the channel list, and its stream is fetched shortly before the start so tuning in is instant;
+- the guide shows the game in the *Sports* category, so it appears in Jellyfin's Sports row, on that station and on Local Sports.
 
-The Denver market reaches past the Denver TV market to every market that covers part of Colorado, plus Cheyenne: Colorado Springs / Pueblo, Grand Junction / Western Slope, Albuquerque / Santa Fe (southwest Colorado) and Cheyenne. It lists 30 stations; these 16 are enabled, and all but Wyoming News Now were tested playing in Jellyfin 12.2:
+An honest caveat: stations' web streams often show their own news instead of network games, because networks and leagues rarely allow games on station websites. The guide description says so.
 
-| Station | Channel | Network | Market |
-| --- | --- | --- | --- |
-| KWGN CW2 | 2.1 | The CW | Denver |
-| KCNC CBS Colorado | 4.1 | CBS | Denver |
-| KMGH Denver7 | 7.1 | ABC | Denver |
-| KUSA 9NEWS | 9.1 | NBC | Denver |
-| KDEN Telemundo Denver | 25.1 | Telemundo | Denver |
-| KDVR FOX31 | 31.1 | FOX | Denver |
-| KRMT Daystar | 41.1 | Daystar | Denver |
-| KOAA News5 | 5.1 | NBC | Colorado Springs / Pueblo |
-| KKTV 11 News | 11.1 | CBS | Colorado Springs / Pueblo |
-| KRDO 13 | 13.1 | ABC | Colorado Springs / Pueblo |
-| KXRM FOX21 | 21.1 | FOX | Colorado Springs / Pueblo |
-| KKCO 11 News | 11.1 | NBC | Grand Junction |
-| KJCT News 8 | 8.1 | ABC | Grand Junction |
-| KGWN Wyoming News Now | 5.1 | CBS | Cheyenne (only during its newscasts) |
-| KOB 4 | 4.1 | NBC | Albuquerque / Santa Fe |
-| KTEL Telemundo Nuevo México | 47.1 | Telemundo | Albuquerque / Santa Fe |
+### Coverage area
 
-Stations are listed Denver first, then the neighboring markets: a local game goes to the first station carrying its network, so a Broncos game on NBC plays 9NEWS rather than an out-of-market NBC station. Channel numbers are the stations' own, so a few repeat across markets.
+<p align="center">
+  <img src="docs/coverage.svg" alt="Your location at the center of rings 50, 100 and 150 miles out; with a 100-mile limit, stations inside it are in Live TV and stations outside it are left out" width="760">
+</p>
 
-The other 14 are listed but disabled, each with a note in the settings page:
+To keep only stations near you, open **Coverage area** in the plugin settings:
 
-| Why | Stations |
-| --- | --- |
-| No live stream found on the page (Nexstar sites outside Denver and Colorado Springs) | KREX 5, KFQX FOX 4, KRQE 13 |
-| Web stream is DRM-protected | KRMA Rocky Mountain PBS, KBDI PBS12 |
-| Streams only in the station's or network's app | KCEC Univision, KTFD UniMas, KPXC ION, KOAT 7 |
-| No live stream on the website | KCDO The Spot, KPJR TBN, KETD Estrella TV |
-| The page plays another station's stream | KTVD My20 (plays 9NEWS), KXTU SOCO CW (plays FOX21) |
+1. Set a **maximum distance** in miles. 0 means no limit, which is the default.
+2. Set **your location**: type a latitude and longitude, or press **Use this device's location**. Browsers share a location only with pages served over HTTPS or from localhost. Leave it empty to measure from the market's center.
+3. Press **Save coverage area**.
 
-Stations on Gray Television's site platform (KKTV, KKCO, KJCT and many others nationwide) stream through Google's ad-insertion service (DAI). The sidecar plays those streams, and reaches them through `dai.google.com` so they also work behind a DNS ad blocker such as AdGuard or Pi-hole, which blocks DAI's other hostname.
+Enabled stations farther away than the limit stay out of Live TV and Local Sports. The station list shows each station's city and distance, and the status line says how many stations are in range. Stations you add yourself are always included, unless you give them a latitude and longitude. Your location stays in Jellyfin's settings; see [PRIVACY.md](PRIVACY.md).
 
-The sidecar does not get around bot checks, DRM or sign-ins. A disabled station can be turned on by pasting a **stream URL** you're allowed to use (a non-expiring `.m3u8`, or a page yt-dlp supports, such as the station's YouTube live) into its settings.
-
-### Install
+## Install
 
 1. **Run the sidecar** next to Jellyfin:
 
@@ -74,46 +98,65 @@ The sidecar does not get around bot checks, DRM or sign-ins. A disabled station 
    docker compose -f sidecar/compose.yaml up -d
    ```
 
-   Outside Denver, add `MARKET=<market>` (a file name in [`sidecar/markets/`](sidecar/markets/)) to `sidecar/.env`; the browser uses that market's time zone unless you set `TZ`. The image runs on x86-64 and on ARM64 (Raspberry Pi 4/5, ARM servers); on ARM it uses Chromium, since Google Chrome isn't built for ARM Linux, so stations whose players need H.264/AAC may not resolve there.
+   To start with a different bundled market, add `MARKET=<market>` to `sidecar/.env`, using a file name from [`sidecar/markets/`](sidecar/markets/). The browser uses that market's time zone unless you set `TZ`.
 
-   It listens on `127.0.0.1:8899` (Jellyfin re-serves the streams to your clients, so it needn't be reachable from elsewhere). With Jellyfin in a bridge-network container instead of host networking, put both on one Docker network and use `http://local-broadcast:8899`.
+   The sidecar listens on `127.0.0.1:8899`. Jellyfin re-serves the streams to your apps, so the sidecar doesn't need to be reachable from anywhere else. If Jellyfin runs in a bridge-network container instead of host networking, put both on one Docker network and use `http://local-broadcast:8899`.
 
-2. **Install the plugin**: in Jellyfin, Dashboard > Plugins > Repositories, add
+   The image runs on x86-64 and ARM64 (Raspberry Pi 4/5, ARM servers). On ARM it uses Chromium, because Google Chrome isn't built for ARM Linux, so stations whose players need H.264/AAC may not work there.
+
+2. **Install the plugin.** In Jellyfin, go to Dashboard > Plugins > Repositories and add:
 
    ```
    https://baverrr.github.io/media-scraper/manifest.json
    ```
 
-   then install **Local Broadcast** from the catalog and restart Jellyfin. (Needs Jellyfin 12.2.)
+   Then install **Local Broadcast** from the catalog and restart Jellyfin.
 
-3. **Configure**: Dashboard > Plugins > Local Broadcast: set the sidecar URL and the API key, pick your market, and save. The plugin adds the *Local Broadcast* tuner and guide; channels appear in Live TV after the guide refresh it queues.
+3. **Configure it.** In Dashboard > Plugins > Local Broadcast, set the sidecar URL and API key, pick your market, and save. The plugin adds the *Local Broadcast* tuner and guide, and the channels appear in Live TV after the guide refresh it starts.
 
-Use **Test now** on a station to see exactly what the sidecar finds (or why not): offline, DRM, bot check, no live manifest, embedded YouTube player, and so on.
+Use **Test now** on a station to see what the sidecar finds, or why not: offline, DRM, bot check, no live stream, an embedded YouTube player, and so on.
 
-#### Coverage area
+## Station support
 
-To keep only stations near you, set **Coverage area** in the settings. Give a maximum distance in miles, and your location: type a latitude and longitude, or use **Use this device's location**. Browsers share a location only with pages served over HTTPS or from localhost. With no location set, distances are measured from the market's center (Denver for the Denver market). Enabled stations farther away than the limit stay out of Live TV and the Local Sports channel. Each station's distance is shown in the list. Stations you add yourself are always included unless you give them a latitude and longitude. 0 means no limit, which is the default. From Denver: Colorado Springs is 63 miles, Cheyenne 97, Pueblo 105, Grand Junction 196 and Albuquerque 334. So 120 miles keeps the Front Range and Cheyenne, 200 adds Grand Junction, and 340 adds Albuquerque.
+Whether a station works depends on how its website streams:
 
-### Other markets
+| The station's website... | Result |
+| --- | --- |
+| plays an HLS stream in its own web player | ✅ Works. Most stations. |
+| streams through Google's ad-insertion service (DAI), common on Gray Television sites | ✅ Works, also behind DNS ad blockers such as AdGuard or Pi-hole: the sidecar uses `dai.google.com`, which they don't block. |
+| embeds YouTube or another site yt-dlp supports | ✅ Works through yt-dlp. |
+| streams only during newscasts | ⚠️ Plays during newscasts; at other times the channel has nothing to play. |
+| uses DRM (Widevine, FairPlay) | ❌ Jellyfin can't play DRM streams. |
+| streams only in an app | ❌ No web stream to find. |
+| shows a bot check | ❌ The sidecar doesn't get around bot checks. |
+| plays another station's stream | Left off, so the same channel doesn't appear twice. |
 
-Markets are JSON files in [`sidecar/markets/`](sidecar/markets/): a `center` (city, latitude, longitude), stations (id, call sign, name, channel, network, `city`, `latitude`, `longitude`, live page URL, optional `streamUrl`, `sportsAliases`, `note`, `enabled`) and local teams (`league` plus ESPN's team abbreviation or id, from the team's ESPN page URL). Add a file for your area, run the station tests from the settings page, and send a pull request. The plugin bundles every market file at build time.
+Each market file keeps the stations that don't work, turned off, with a note saying why; the settings page shows the note. To turn one on, paste a **stream URL** you're allowed to use into its settings: a `.m3u8` that doesn't expire, or a page yt-dlp supports, such as the station's YouTube live stream.
 
-### Sidecar configuration
+## Markets
+
+A market is a JSON file in [`sidecar/markets/`](sidecar/markets/) with its center, its stations and its local teams. The plugin bundles every market file at build time, and **Load this market's stations and teams** in the settings resets your list to a market's defaults.
+
+Stations in one market file can come from several neighboring TV markets. The market's own stations come first, because a local game goes to the first station carrying its network. Channel numbers are the stations' own, so a few can repeat.
+
+Missing your area? [CONTRIBUTING.md](CONTRIBUTING.md) shows the format and how to test it. Pull requests are welcome.
+
+## Sidecar configuration
 
 | Variable | Default | |
 | --- | --- | --- |
-| `API_KEY` | none | Required for changes from the plugin (`X-Api-Key`). |
-| `MARKET` | `denver` | Defaults until the plugin sends its own stations and teams. |
+| `API_KEY` | none | Required for changes from the plugin (`X-Api-Key`). The compose file reads it from `LOCAL_BROADCAST_API_KEY` in `sidecar/.env`. |
+| `MARKET` | set in `compose.yaml` | Stations and teams used until the plugin sends its own. |
 | `TZ` | the market's | Time zone the station pages see (e.g. `America/Chicago`). |
 | `MAX_HEIGHT` | `1080` | Highest quality picked from a station's variants. |
 | `RESOLVE_TTL_MINUTES` | `30` | How long a found stream is reused (shorter when its token expires sooner). |
 | `MAX_CONCURRENT_RESOLVES` | `2` | Browser pages at once; local-sports stations jump the queue. |
-| `BROWSER_CHANNEL` | `chrome` | `chrome` has H.264/AAC (many players need them); empty uses bundled Chromium. |
+| `BROWSER_CHANNEL` | `chrome` | `chrome` has H.264/AAC, which many players need; empty uses the bundled Chromium. |
 | `PUBLIC_URL` | from the request | Base URL written into the M3U. |
 
-HTTP API: `GET /playlist.m3u`, `GET /guide.xml`, `GET /stream/<id>.m3u8` (`local-sports` included), `GET /api/status`, `GET /api/sports`, `GET /api/stations`; with the API key: `PUT /api/stations`, `PUT /api/sports`, `POST /api/stations/<id>/test`. Proxied segment URLs are HMAC-signed, so the proxy can't be used to fetch arbitrary URLs.
+HTTP API: `GET /playlist.m3u`, `GET /guide.xml`, `GET /stream/<id>.m3u8` (`local-sports` included), `GET /api/status`, `GET /api/sports`, `GET /api/stations`. With the API key: `PUT /api/stations`, `PUT /api/sports`, `POST /api/stations/<id>/test`. Proxied segment URLs are HMAC-signed, so the proxy can't be used to fetch arbitrary URLs.
 
-### Development
+## Development
 
 ```bash
 (cd sidecar && npm ci && npx playwright install chromium && npm test)
@@ -121,9 +164,18 @@ docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet 
 docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
 ```
 
-The sidecar tests include `media-scraper.js` in a real browser (`sidecar/test/scraper.test.js`); they're skipped when Playwright has no browser installed.
+The sidecar tests run `media-scraper.js` in a real browser (`sidecar/test/scraper.test.js`); they're skipped when Playwright has no browser installed.
 
-CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main), and on a `vX.Y.Z` tag matching `version` in `build.yaml` publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin repository manifest on GitHub Pages. Installing from GitHub needs the repository, its Pages site and the container package to be public. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
+CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, and publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main). On a `vX.Y.Z` tag that matches `version` in `build.yaml`, it publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin catalog on GitHub Pages. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
+
+## Privacy and security
+
+- **[PRIVACY.md](PRIVACY.md):** what's stored (only on your server) and which sites the sidecar contacts. No telemetry, no accounts.
+- **[SECURITY.md](SECURITY.md):** how to report a vulnerability privately, and how to run the sidecar safely.
+
+## Disclaimer
+
+Local Broadcast is an independent project. It isn't affiliated with or endorsed by Jellyfin, ESPN, any TV network, or any station or station group. Station names, call signs, network names and logos belong to their owners. The plugin plays only streams that stations publish for free on their own websites. You're responsible for using it in line with those websites' terms and the laws where you live.
 
 ## media-scraper.js
 
