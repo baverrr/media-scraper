@@ -27,26 +27,36 @@ Honest caveat: stations' web streams often show their own news programming inste
 
 ### What works (Denver market)
 
-The Denver market file lists 19 stations. These 6 play in Jellyfin (tested with Jellyfin 12.2's ffmpeg):
+The Denver market reaches past the Denver TV market to every market that covers part of Colorado, plus Cheyenne: Colorado Springs / Pueblo, Grand Junction / Western Slope, Albuquerque / Santa Fe (southwest Colorado) and Cheyenne. It lists 30 stations; these 13 are enabled, and all but Wyoming News Now were tested playing in Jellyfin 12.2:
 
-| Station | Channel | Network |
-| --- | --- | --- |
-| KCNC CBS Colorado | 4.1 | CBS |
-| KOAA News5 (Colorado Springs / Pueblo) | 5.1 | NBC |
-| KMGH Denver7 | 7.1 | ABC |
-| KUSA 9NEWS | 9.1 | NBC |
-| KDEN Telemundo Denver | 25.1 | Telemundo |
-| KRMT Daystar | 41.1 | Daystar |
+| Station | Channel | Network | Market |
+| --- | --- | --- | --- |
+| KCNC CBS Colorado | 4.1 | CBS | Denver |
+| KMGH Denver7 | 7.1 | ABC | Denver |
+| KUSA 9NEWS | 9.1 | NBC | Denver |
+| KDEN Telemundo Denver | 25.1 | Telemundo | Denver |
+| KRMT Daystar | 41.1 | Daystar | Denver |
+| KOAA News5 | 5.1 | NBC | Colorado Springs / Pueblo |
+| KKTV 11 News | 11.1 | CBS | Colorado Springs / Pueblo |
+| KRDO 13 | 13.1 | ABC | Colorado Springs / Pueblo |
+| KKCO 11 News | 11.1 | NBC | Grand Junction |
+| KJCT News 8 | 8.1 | ABC | Grand Junction |
+| KGWN Wyoming News Now | 5.1 | CBS | Cheyenne (only during its newscasts) |
+| KOB 4 | 4.1 | NBC | Albuquerque / Santa Fe |
+| KTEL Telemundo Nuevo México | 47.1 | Telemundo | Albuquerque / Santa Fe |
 
-The other 13 are listed but disabled, each with a note in the settings page:
+Stations are listed Denver first, then the neighboring markets: a local game goes to the first station carrying its network, so a Broncos game on NBC plays 9NEWS rather than an out-of-market NBC station. Channel numbers are the stations' own, so a few repeat across markets.
+
+The other 17 are listed but disabled, each with a note in the settings page:
 
 | Why | Stations |
 | --- | --- |
-| Site shows a bot check (Nexstar) | KWGN CW2, KDVR FOX31 |
+| Site shows a bot check (Nexstar) | KWGN CW2, KDVR FOX31, KXRM FOX21, KXTU SOCO CW, KREX 5, KFQX FOX 4, KRQE 13 |
 | Web stream is DRM-protected | KRMA Rocky Mountain PBS, KBDI PBS12 |
-| Streams only in the network's app | KCEC Univision, KTFD UniMas, KPXC ION |
-| No live stream on the website | KCDO The Spot, KTVD My20, KRDO 13, KPJR TBN, KETD Estrella TV |
-| Station player fails in headless browsers | KKTV 11 |
+| Streams only in the station's or network's app | KCEC Univision, KTFD UniMas, KPXC ION, KOAT 7 |
+| No live stream on the website | KCDO The Spot, KTVD My20, KPJR TBN, KETD Estrella TV |
+
+Stations on Gray Television's site platform (KKTV, KKCO, KJCT and many others nationwide) stream through Google's ad-insertion service (DAI). The sidecar plays those streams, and reaches them through `dai.google.com` so they also work behind a DNS ad blocker such as AdGuard or Pi-hole, which blocks DAI's other hostname.
 
 The sidecar does not get around bot checks, DRM or sign-ins. A disabled station can be turned on by pasting a **stream URL** you're allowed to use (a non-expiring `.m3u8`, or a page yt-dlp supports, such as the station's YouTube live) into its settings.
 

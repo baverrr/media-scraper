@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { buildM3u, buildXmltv } from '../src/guide.js';
 import { normalizeStations, normalizeSports, loadMarket, StationStore } from '../src/stations.js';
-import { pickBest, mergeCandidates, scoreCandidate, pickHeaders } from '../src/pick.js';
+import { pickBest, mergeCandidates, scoreCandidate, pickHeaders, isAd, unblockedStreamUrl } from '../src/pick.js';
 
 const stations = [
   { id: 'kusa', callSign: 'KUSA', name: '9NEWS', channel: '9.1', network: 'NBC', url: 'https://www.9news.com/watch', logo: 'https://x/l.png', enabled: true },
@@ -108,4 +108,16 @@ test('stations: an unknown market only matters while there are no saved settings
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('pick: Google DAI live streams are the programme, not ads, and avoid the ad-blocked host', () => {
+  const dai = 'https://pubads.g.doubleclick.net/ssai/event/UKvg2XfoRHGpLJry_jnc-Q/master.m3u8?ContentId=x';
+  assert.equal(isAd(dai), false);
+  assert.equal(isAd('https://dai.google.com/linear/hls/pa/event/abc/stream/def/master.m3u8'), false);
+  assert.equal(isAd('https://pubads.g.doubleclick.net/gampad/ads?iu=/123/preroll'), true);
+  assert.equal(isAd('https://cdn.example/ads/preroll.m3u8'), true);
+  assert.equal(unblockedStreamUrl(dai), 'https://dai.google.com/ssai/event/UKvg2XfoRHGpLJry_jnc-Q/master.m3u8?ContentId=x');
+  assert.equal(unblockedStreamUrl('https://cdn.example/live.m3u8'), 'https://cdn.example/live.m3u8');
+  const best = pickBest([{ url: unblockedStreamUrl(dai), type: 'hls', sources: ['network'], probe: { ok: true, live: true, master: true } }]);
+  assert.ok(best);
 });
