@@ -105,6 +105,17 @@ function scrubbed(e, what, details, { username, password }) {
   return new ResolveError(`${what}: ${message}`, details);
 }
 
+// The page offers to sign in: a visible password field, or a "Log in" / "Sign in" control.
+async function asksToSignIn(page) {
+  if ((await signInForm(page)).password) return true;
+  for (const frame of page.frames()) {
+    for (const role of ['button', 'link']) {
+      if (await frame.getByRole(role, { name: SIGN_IN_NAMES }).filter({ visible: true }).count().catch(() => 0)) return true;
+    }
+  }
+  return false;
+}
+
 // A page whose form submits with "Log in" / "Sign in": a sign-in form, not a sign-up one.
 async function looksLikeSignIn(frame) {
   const names = await frame.locator('button[type="submit"], input[type="submit"], form button').filter({ visible: true })
@@ -203,7 +214,8 @@ export class Resolver {
   async browser() {
     if (!this.browserPromise) {
       const options = { args: ['--autoplay-policy=no-user-gesture-required', '--disable-blink-features=AutomationControlled', '--mute-audio'] };
-      // Prefer Google Chrome (has H.264/AAC); fall back to the bundled Chromium where it's missing.
+      // Prefer Google Chrome; fall back to the bundled Chromium where it's missing (ARM). Both play
+      // H.264/AAC, which station players check for before they request a stream.
       const launch = this.channel
         ? chromium.launch({ ...options, channel: this.channel }).catch(e => {
           this.log.warn?.(`browser channel "${this.channel}" unavailable (${e.message.split('\n')[0]}); using bundled Chromium`);
@@ -247,8 +259,9 @@ export class Resolver {
       // Too soon to sign in again (or a failed sign-in waiting): keep the session, and report the
       // page as it was, so a station that is just off the air still plays its slate.
       // A session signed in recently is probably fine and the station just off the air.
-      // Test now (retrying) asks for a fresh sign-in whatever the session's age.
-      if ((login.sessionFresh?.() && !login.retrying?.()) || login.mayAttempt?.()) throw e;
+      // Sign in again when the page asks for it, when the session is old, or when Test now asks;
+      // otherwise the station is probably just off the air. Never sooner than mayAttempt allows.
+      if ((!e.details.signedOut && login.sessionFresh?.() && !login.retrying?.()) || login.mayAttempt?.()) throw e;
       this.log.info?.(`[${station.id}] no stream with the saved session; signing in again`);
       await login.forgetSession();
       return this.resolvePage(station, { ...login, session: null, mayAttempt: () => null });
@@ -364,11 +377,14 @@ export class Resolver {
 
       const drmOnly = candidates.length > 0 && candidates.some(c => c.probe?.drm) && !candidates.some(c => c.probe?.ok);
       const botCheck = !candidates.length && await this.showsBotCheck(page, response);
+      // With a saved session: is the page asking to sign in (signed out), or just not streaming?
+      const signedOut = !!login?.session && !drmOnly && !botCheck && await asksToSignIn(page);
       const message = drmOnly ? 'The station\'s stream is DRM-protected; Jellyfin can\'t play it'
         : botCheck ? 'The station\'s site shows a bot check instead of the page; the sidecar doesn\'t get around bot checks'
           : 'No live stream found on the page';
       throw new ResolveError(message, {
         reason: drmOnly ? 'drm' : botCheck ? 'bot-check' : 'no-stream',
+        signedOut,
         candidates: candidates.map(c => ({ url: c.url, sources: c.sources, paired: !!c.paired, probe: c.probe })),
         embeds,
         tookMs: Date.now() - started,

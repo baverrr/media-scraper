@@ -99,11 +99,26 @@ Enabled stations farther away than the limit stay out of Live TV and Local Sport
    docker compose -f sidecar/compose.yaml up -d
    ```
 
+   **On Windows**, with [Docker Desktop](https://docs.docker.com/desktop/), run this in PowerShell from the repository folder instead:
+
+   ```powershell
+   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+   $api = [byte[]]::new(24); $rng.GetBytes($api)
+   $login = [byte[]]::new(32); $rng.GetBytes($login)
+   Set-Content -Path sidecar/.env -Encoding ascii -Value @(
+     "LOCAL_BROADCAST_API_KEY=$(-join ($api | ForEach-Object { $_.ToString('x2') }))",
+     "LOCAL_BROADCAST_LOGIN_KEY=$([Convert]::ToBase64String($login))"
+   )
+   docker compose -f sidecar/compose.yaml up -d
+   ```
+
+   Then open `sidecar/.env` in Notepad to copy the API key into the plugin. **On macOS**, the commands above for Linux work as they are, with Docker Desktop. On both, Docker Desktop publishes the sidecar on `127.0.0.1:8899` of your computer, so Jellyfin installed directly on the computer uses `http://127.0.0.1:8899`. Jellyfin running in Docker Desktop too uses a shared Docker network and `http://local-broadcast:8899`, since host networking isn't the same there.
+
    To start with a different bundled market, add `MARKET=<market>` to `sidecar/.env`, using a file name from [`sidecar/markets/`](sidecar/markets/). The browser uses that market's time zone unless you set `TZ`.
 
    The sidecar listens on `127.0.0.1:8899`. Jellyfin re-serves the streams to your apps, so the sidecar doesn't need to be reachable from anywhere else. If Jellyfin runs in a bridge-network container instead of host networking, put both on one Docker network and use `http://local-broadcast:8899`.
 
-   The image runs on x86-64 and ARM64 (Raspberry Pi 4/5, ARM servers). On ARM it uses Chromium, because Google Chrome isn't built for ARM Linux, so stations whose players need H.264/AAC may not work there.
+   The image runs on x86-64 and ARM64 (Raspberry Pi 4/5, ARM servers). On ARM it uses Playwright's Chromium, because Google Chrome isn't built for ARM Linux. That Chromium plays H.264/AAC like Chrome does; with it, every enabled bundled station resolved in testing (on x86-64).
 
 2. **Install the plugin.** In Jellyfin, go to Dashboard > Plugins > Repositories and add:
 
@@ -154,7 +169,7 @@ Missing your area? [CONTRIBUTING.md](CONTRIBUTING.md) shows the format and how t
 | `LOGIN_KEY` | generated | Encrypts saved station sign-ins (32 bytes: `openssl rand -base64 32`). The compose file reads it from `LOCAL_BROADCAST_LOGIN_KEY`. Unset, a key is generated in the data volume as `login.key`. |
 | `RESOLVE_TTL_MINUTES` | `30` | How long a found stream is reused (shorter when its token expires sooner). |
 | `MAX_CONCURRENT_RESOLVES` | `2` | Browser pages at once; local-sports stations jump the queue. |
-| `BROWSER_CHANNEL` | `chrome` | `chrome` has H.264/AAC, which many players need; empty uses the bundled Chromium. |
+| `BROWSER_CHANNEL` | `chrome` | Google Chrome; empty uses the bundled Chromium (what ARM uses). Both play H.264/AAC. |
 | `PUBLIC_URL` | from the request | Base URL written into the M3U. |
 
 HTTP API: `GET /playlist.m3u`, `GET /guide.xml`, `GET /stream/<id>.m3u8` (`local-sports` included), `GET /api/status`, `GET /api/sports`, `GET /api/stations`. With the API key: `PUT /api/stations`, `PUT /api/sports`, `POST /api/stations/<id>/test`. Proxied segment URLs are HMAC-signed, so the proxy can't be used to fetch arbitrary URLs.

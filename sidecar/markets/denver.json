@@ -163,7 +163,7 @@
       "longitude": -105.2705,
       "url": "https://www.univision.com/local/denver-kcec",
       "enabled": false,
-      "note": "Univision streams only in its app."
+      "note": "Univision streams live only in its paid apps (Univision NOW, ViX Premium)."
     },
     {
       "id": "ktvd",
@@ -176,7 +176,7 @@
       "longitude": -104.9903,
       "url": "https://www.9news.com/watch",
       "enabled": false,
-      "note": "No separate web stream; the 9NEWS page plays KUSA.",
+      "note": "My20 streams only in the 9NEWS+ apps; the 9NEWS page plays KUSA.",
       "sportsAliases": [
         "Altitude Sports",
         "Altitude"
@@ -243,7 +243,7 @@
       "longitude": -105.2705,
       "url": "https://www.univision.com/unimas",
       "enabled": false,
-      "note": "Univision streams only in its app."
+      "note": "UniMás streams live only in Univision's paid apps (Univision NOW, ViX Premium)."
     },
     {
       "id": "ketd",
@@ -267,9 +267,9 @@
       "city": "Denver, CO",
       "latitude": 39.7392,
       "longitude": -104.9903,
-      "url": "https://iontelevision.com/live",
-      "enabled": false,
-      "note": "ION streams only in its apps and FAST services."
+      "url": "https://pluto.tv/us/live-tv/ion",
+      "enabled": true,
+      "note": "Plays ION's national feed, from ION's own free channel on Pluto TV: KPXC's programmes, without its local breaks."
     },
     {
       "id": "koaa",
@@ -334,7 +334,7 @@
       "longitude": -104.8214,
       "url": "https://www.fox21news.com/live/",
       "enabled": false,
-      "note": "Colorado Springs / Pueblo market. Its page plays FOX21 (KXRM), not SOCO CW."
+      "note": "Colorado Springs / Pueblo market. SOCO CW has no free web stream: the FOX21 page plays KXRM, and Nexstar's other live streams need a sign-in."
     },
     {
       "id": "kkco",
@@ -436,9 +436,9 @@
       "city": "Albuquerque, NM",
       "latitude": 35.0844,
       "longitude": -106.6504,
-      "url": "https://www.koat.com/",
-      "enabled": false,
-      "note": "Albuquerque / Santa Fe market. Hearst stations stream only in their apps."
+      "url": "https://www.koat.com/nowcast",
+      "enabled": true,
+      "note": "Albuquerque / Santa Fe market. KOAT's NowCast page streams its newscasts live; between them the channel shows the \"Nothing is streaming right now\" screen."
     },
     {
       "id": "krqe",

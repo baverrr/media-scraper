@@ -6,3 +6,5 @@ bin/
 obj/
 dist/
 release/
+# Backups of the settings file (they hold the same keys)
+sidecar/.env.bak*

@@ -173,6 +173,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool ManageLiveTv { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the sidecar keeps every enabled station's stream
+    /// resolved in the background, so tuning in is instant (at the cost of some CPU).
+    /// </summary>
+    public bool KeepStreamsReady { get; set; }
+
+    /// <summary>
     /// Gets or sets the latitude coverage distances are measured from. Unset uses the market's center.
     /// </summary>
     public double? HomeLatitude { get; set; }

@@ -62,7 +62,7 @@ test('logins: key formats and validation', () => {
 
 // A site with a two-field sign-in form behind a "Log in" button, and a live page that loads its
 // HLS stream only for a signed-in session.
-let site, siteUrl, signIns = 0;
+let site, siteUrl, signIns = 0, offAir = false;
 const SEGMENT = Buffer.alloc(188 * 10, 0x47);
 before(async () => {
   site = http.createServer((req, res) => {
@@ -71,6 +71,7 @@ before(async () => {
     const html = body => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(`<!doctype html><html><body>${body}</body></html>`); };
     if (u.pathname === '/live') {
       if (!signedIn) return html('<h1>Live</h1><button id="showLogin">Log in</button><div id="f" hidden><form method="post" action="/session"><input type="email" name="email"><input type="password" name="password"><button>Go</button></form></div><script>showLogin.onclick=()=>f.hidden=false</script>');
+      if (offAir) return html('<h1>Live</h1><p>Our next newscast starts at 5 PM.</p><a href="/account">My account</a>');
       return html('<h1>Live</h1><video id="v"></video><script>fetch("/live/stream.m3u8")</script>');
     }
     if (u.pathname === '/session' && req.method === 'POST') {
@@ -124,20 +125,20 @@ test('resolver: signs in through the site\'s form, then reuses the session', { t
 
     // A session the site no longer accepts: no stream with it, so the resolver signs in again,
     // but not within 10 minutes of the last sign-in.
-    // With a recent session it reports the page as it is (so an off-air station plays its slate)
-    // and keeps the session; once the session is hours old, it signs in again.
+    // A recent session the site no longer accepts: the page asks to sign in, so it signs in again,
+    // though not within 10 minutes of the last sign-in (meanwhile it keeps the session).
     logins.get('member').session.cookies.find(c => c.name === 'sid').value = 'expired';
     await assert.rejects(app.cache.get(store.get('member'), { force: true }), /No live stream found/);
     assert.equal(logins.get('member').session.cookies.find(c => c.name === 'sid').value, 'expired');
-    t += 7 * 3_600_000;
+    t += 11 * 60_000;
     await app.cache.get(store.get('member'), { force: true });
     assert.equal(signIns, 2);
-    // Test now signs in again even with a recent session (past the 10-minute gap).
-    logins.get('member').session.cookies.find(c => c.name === 'sid').value = 'expired';
+    // Off the air while signed in (no stream, no sign-in prompt): no new sign-in, the slate plays.
+    offAir = true;
     t += 11 * 60_000;
-    logins.allowRetry('member', t + 60_000);
-    await app.cache.get(store.get('member'), { force: true });
-    assert.equal(signIns, 3);
+    await assert.rejects(app.cache.get(store.get('member'), { force: true }), /No live stream found/);
+    assert.equal(signIns, 2);
+    offAir = false;
 
     // A wrong password is reported as a sign-in failure, not "nothing streaming".
     await logins.set('member', { username: 'viewer@example.com', password: 'wrong' });

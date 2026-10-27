@@ -32,9 +32,9 @@ WORKDIR /app
 COPY sidecar/package.json sidecar/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
-# Google Chrome next to the bundled Chromium: Chromium has no H.264/AAC, and many station players
-# check for those codecs before they request a stream. Chrome is only built for amd64; on other
-# architectures the sidecar falls back to Chromium.
+# Google Chrome next to the bundled Chromium, as the browser closest to what viewers use. Chrome is
+# only built for amd64; on other architectures the sidecar uses the bundled Chromium, which plays
+# H.264/AAC as well (Playwright's builds include those codecs; older ones didn't).
 RUN if [ "${TARGETARCH:-amd64}" = amd64 ]; then npx playwright install --with-deps chrome && rm -rf /var/lib/apt/lists/*; fi
 COPY sidecar/src ./src
 COPY sidecar/markets ./markets
