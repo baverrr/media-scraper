@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 460" width="860" height="460" role="img" aria-labelledby="title desc">
+  <title id="title">Coverage radius</title>
+  <desc id="desc">Your location at the center of dashed rings 50, 100 and 150 miles out. With a 100-mile limit, stations inside the second ring are in Live TV and stations outside it are left out.</desc>
+  <style>
+    .bg { fill: #ffffff; } .ring { fill: none; stroke: #8c959f; stroke-width: 1.5; stroke-dasharray: 5 6; }
+    .limit { fill: #8250df; fill-opacity: .08; stroke: #8250df; stroke-width: 2.5; }
+    .label { fill: #656d76; font: 600 13px system-ui, sans-serif; } .limitlabel { fill: #8250df; font: 700 14px system-ui, sans-serif; }
+    .in { fill: #1a7f37; } .out { fill: #8c959f; } .you { fill: #8250df; }
+    .text { fill: #1f2328; font: 15px system-ui, sans-serif; } .head { fill: #1f2328; font: 700 17px system-ui, sans-serif; }
+    .muted { fill: #656d76; font: 14px system-ui, sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; } .ring { stroke: #6e7681; } .limit { fill: #a371f7; stroke: #a371f7; }
+      .label, .muted { fill: #8d96a0; } .limitlabel, .you { fill: #a371f7; } .in { fill: #3fb950; } .out { fill: #6e7681; }
+      .text, .head { fill: #e6edf3; }
+    }
+  </style>
+  <rect class="bg" width="860" height="460" rx="14"/>
+  <circle class="limit" cx="230" cy="230" r="140"/>
+  <circle class="ring" cx="230" cy="230" r="70"/>
+  <circle class="ring" cx="230" cy="230" r="210"/>
+  <text class="label" x="278" y="186">50 mi</text>
+  <text class="limitlabel" x="318" y="126">100 mi limit</text>
+  <text class="label" x="372" y="62">150 mi</text>
+  <circle class="in" cx="248" cy="214" r="9"/><circle class="in" cx="214" cy="248" r="9"/><circle class="in" cx="262" cy="246" r="9"/>
+  <circle class="in" cx="190" cy="152" r="9"/><circle class="in" cx="320" cy="290" r="9"/><circle class="in" cx="140" cy="300" r="9"/>
+  <circle class="out" cx="410" cy="320" r="9"/><circle class="out" cx="60" cy="140" r="9"/><circle class="out" cx="300" cy="420" r="9"/><circle class="out" cx="96" cy="400" r="9"/>
+  <path class="you" d="M230 214 l4.4 10.2 11 .9 -8.4 7.2 2.6 10.8 -9.6 -5.8 -9.6 5.8 2.6 -10.8 -8.4 -7.2 11 -.9z"/>
+  <text class="head" x="500" y="120">Coverage area</text>
+  <path class="you" d="M510 150 l3 7 7.6 .6 -5.8 5 1.8 7.4 -6.6 -4 -6.6 4 1.8 -7.4 -5.8 -5 7.6 -.6z"/>
+  <text class="text" x="530" y="167">Your location, or the market's center</text>
+  <circle class="in" cx="510" cy="198" r="8"/>
+  <text class="text" x="530" y="204">Inside the limit: in Live TV</text>
+  <circle class="out" cx="510" cy="234" r="8"/>
+  <text class="text" x="530" y="240">Outside: left out, with a note why</text>
+  <text class="muted" x="500" y="286">Distances are to each station's city.</text>
+  <text class="muted" x="500" y="310">0 means no limit (the default).</text>
+  <text class="muted" x="500" y="334">Stations you add without a location</text>
+  <text class="muted" x="500" y="354">are always included.</text>
+</svg>
