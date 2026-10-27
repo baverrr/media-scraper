@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,7 +31,7 @@ public class SyncService : IHostedService, IDisposable
     private readonly ILogger<SyncService> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly CancellationTokenSource _stopping = new();
-    private string? _lastStations;
+    private readonly PushedStationsRecord _lastStations;
     private string? _lastGames;
 
     public SyncService(SidecarClient sidecar, LiveTvRegistrar registrar, ILogger<SyncService> logger)
@@ -36,6 +39,9 @@ public class SyncService : IHostedService, IDisposable
         _sidecar = sidecar;
         _registrar = registrar;
         _logger = logger;
+        _lastStations = new PushedStationsRecord(
+            () => Plugin.Instance is { } plugin ? Path.Combine(plugin.DataFolderPath, "last-pushed-stations.txt") : null,
+            logger);
     }
 
     /// <summary>
@@ -117,13 +123,10 @@ public class SyncService : IHostedService, IDisposable
                 }
             }
 
-            // Compared with the last successful push in this run. The first push after startup
-            // isn't a change: Jellyfin's own schedule keeps an existing guide current.
-            var stationsChanged = result.SidecarOk && _lastStations is not null && !string.Equals(_lastStations, stationsJson, StringComparison.Ordinal);
-            if (result.SidecarOk)
-            {
-                _lastStations = stationsJson;
-            }
+            // Compared with the last successful push, kept across restarts: stations changed while
+            // Jellyfin was down (an upgrade that reseeds them, an edited settings file) refresh the
+            // guide too.
+            var stationsChanged = result.SidecarOk && _lastStations.Update(stationsJson);
 
             if (config.ManageLiveTv && result.SidecarOk && (refreshGuide || registered || stationsChanged))
             {
@@ -255,6 +258,78 @@ public class SyncService : IHostedService, IDisposable
         _stopping.Dispose();
         _lock.Dispose();
         GC.SuppressFinalize(this);
+    }
+}
+
+/// <summary>
+/// Remembers a fingerprint of the stations last pushed to the sidecar, in a file so it survives
+/// restarts.
+/// </summary>
+internal sealed class PushedStationsRecord
+{
+    private readonly Func<string?> _path;
+    private readonly ILogger _logger;
+    private string? _last;
+    private bool _loaded;
+
+    public PushedStationsRecord(Func<string?> path, ILogger logger)
+    {
+        _path = path;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Records a successful push.
+    /// </summary>
+    /// <param name="stationsJson">The pushed settings, serialized.</param>
+    /// <returns>Whether they differ from the last push, or nothing was recorded yet (first run, or
+    /// an older version that didn't record it).</returns>
+    public bool Update(string stationsJson)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(stationsJson)));
+        if (!_loaded)
+        {
+            _last = Read();
+            _loaded = true;
+        }
+
+        if (string.Equals(_last, hash, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _last = hash;
+        Write(hash);
+        return true;
+    }
+
+    private string? Read()
+    {
+        try
+        {
+            return _path() is { } path && File.Exists(path) ? File.ReadAllText(path).Trim() : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug("Local Broadcast: could not read the last pushed stations: {Message}", e.Message);
+            return null;
+        }
+    }
+
+    private void Write(string hash)
+    {
+        try
+        {
+            if (_path() is { } path)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, hash);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Local Broadcast: could not save the last pushed stations: {Message}", e.Message);
+        }
     }
 }
 
