@@ -4,6 +4,21 @@
 export const AD_RE = /livestream-update-needed|update-needed|\/slate\/|doubleclick|googlesyndication|imasdk|pubads|g\.doubleclick|freewheel|fwmrm|springserve|spotx|adsrvr|amazon-adsystem|innovid|tremorhub|serving-sys|\/ads?\/|[?&]ad(?:s|_?id)?=|preroll|pre-roll/i;
 const MANIFEST_RE = /\.(m3u8|mpd)(\?|#|$)/i;
 
+// Google DAI (server-side ad insertion) live streams: the programme itself, with ads stitched in,
+// served from ad hostnames. Gray Television's station players use them. Not ads.
+const DAI_STREAM_RE = /^https:\/\/(?:pubads\.g\.doubleclick\.net|dai\.google\.com)\/(?:ssai|linear)\//i;
+
+export function isAd(url) {
+  return AD_RE.test(url) && !DAI_STREAM_RE.test(url);
+}
+
+// DAI answers the same stream requests on dai.google.com as on pubads.g.doubleclick.net, which
+// DNS ad blockers (AdGuard, Pi-hole) block; use the host that isn't blocked.
+export const DAI_BLOCKED_HOST_RE = /^https:\/\/pubads\.g\.doubleclick\.net\/(ssai|linear)\//i;
+export function unblockedStreamUrl(url) {
+  return String(url).replace(DAI_BLOCKED_HOST_RE, 'https://dai.google.com/$1/');
+}
+
 export function manifestTypeOf(url, contentType = '') {
   if (/mpegurl/i.test(contentType) || /\.m3u8(\?|#|$)/i.test(url)) return 'hls';
   if (/dash\+xml/i.test(contentType) || /\.mpd(\?|#|$)/i.test(url)) return 'dash';
@@ -20,7 +35,7 @@ export function isManifestUrl(url) {
 //   network: actually requested by the page, not just mentioned in markup
 export function scoreCandidate(c) {
   if (!c.probe || !c.probe.ok || c.probe.live !== true) return -Infinity;
-  if (AD_RE.test(c.url)) return -Infinity;
+  if (isAd(c.url)) return -Infinity;
   let score = 0;
   // Live HLS the page actually used (its player's, or requested) beats DASH: only HLS goes through
   // the proxy (with the page's headers, re-resolving behind stable URLs); DASH is a bare redirect,
