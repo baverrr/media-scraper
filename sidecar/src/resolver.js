@@ -106,12 +106,12 @@ function scrubbed(e, what, details, { username, password }) {
 }
 
 // The page offers to sign in: a visible password field, or a "Log in" / "Sign in" control.
+// The page itself, not its embedded widgets (a comments box has its own "Log in" button).
 async function asksToSignIn(page) {
-  if ((await signInForm(page)).password) return true;
-  for (const frame of page.frames()) {
-    for (const role of ['button', 'link']) {
-      if (await frame.getByRole(role, { name: SIGN_IN_NAMES }).filter({ visible: true }).count().catch(() => 0)) return true;
-    }
+  const frame = page.mainFrame();
+  if (await visible(frame, 'input[type="password"]')) return true;
+  for (const role of ['button', 'link']) {
+    if (await frame.getByRole(role, { name: SIGN_IN_NAMES }).filter({ visible: true }).count().catch(() => 0)) return true;
   }
   return false;
 }

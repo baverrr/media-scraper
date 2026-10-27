@@ -133,11 +133,20 @@ test('resolver: signs in through the site\'s form, then reuses the session', { t
     t += 11 * 60_000;
     await app.cache.get(store.get('member'), { force: true });
     assert.equal(signIns, 2);
+    // Test now signs in again even with a recent session, when the page has no stream and doesn't
+    // ask to sign in (past the 10-minute gap).
+    offAir = true;
+    t += 11 * 60_000;
+    logins.allowRetry('member', t + 60_000);
+    await assert.rejects(app.cache.get(store.get('member'), { force: true }), /No live stream found/);
+    assert.equal(signIns, 3);
+    offAir = false;
+
     // Off the air while signed in (no stream, no sign-in prompt): no new sign-in, the slate plays.
     offAir = true;
     t += 11 * 60_000;
     await assert.rejects(app.cache.get(store.get('member'), { force: true }), /No live stream found/);
-    assert.equal(signIns, 2);
+    assert.equal(signIns, 3);
     offAir = false;
 
     // A wrong password is reported as a sign-in failure, not "nothing streaming".
