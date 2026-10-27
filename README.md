@@ -122,7 +122,7 @@ Whether a station works depends on how its website streams:
 | plays an HLS stream in its own web player | ✅ Works. Most stations. |
 | streams through Google's ad-insertion service (DAI), common on Gray Television sites | ✅ Works, also behind DNS ad blockers such as AdGuard or Pi-hole: the sidecar uses `dai.google.com`, which they don't block. |
 | embeds YouTube or another site yt-dlp supports | ✅ Works through yt-dlp. |
-| streams only during newscasts | ⚠️ Plays during newscasts; at other times the channel has nothing to play. |
+| streams only during newscasts | ⚠️ Plays during newscasts; at other times the channel shows a "Nothing is streaming right now" screen. |
 | uses DRM (Widevine, FairPlay) | ❌ Jellyfin can't play DRM streams. |
 | streams only in an app | ❌ No web stream to find. |
 | shows a bot check | ❌ The sidecar doesn't get around bot checks. |

@@ -88,7 +88,7 @@
       "longitude": -103.2077,
       "url": "https://www.thespottv.com/denver-3",
       "enabled": false,
-      "note": "No live stream on the station website."
+      "note": "No live stream online: The Spot is on antenna, cable and satellite only."
     },
     {
       "id": "kcnc",
@@ -217,7 +217,7 @@
       "longitude": -104.7091,
       "url": "https://www.tbn.org/live",
       "enabled": false,
-      "note": "No stream found on the page."
+      "note": "TBN's live stream on TBN+ needs a signed-in account; its YouTube channel isn't live around the clock."
     },
     {
       "id": "krmt",
@@ -253,9 +253,9 @@
       "city": "Castle Rock, CO",
       "latitude": 39.3722,
       "longitude": -104.8561,
-      "url": "https://www.estrellatv.com/live",
-      "enabled": false,
-      "note": "No stream found on the page."
+      "url": "https://www.estrellatv.com/en?section=livesection",
+      "enabled": true,
+      "note": "Plays Estrella TV's national live stream from estrellatv.com."
     },
     {
       "id": "kpxc",
@@ -372,7 +372,7 @@
       "longitude": -108.5506,
       "url": "https://www.westernslopenow.com/live/",
       "enabled": false,
-      "note": "Grand Junction / Western Slope market. No live stream found on the page (Nexstar; the Denver and Colorado Springs Nexstar pages do stream). Paste a stream URL you are allowed to use to enable it."
+      "note": "Grand Junction / Western Slope market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it."
     },
     {
       "id": "kfqx",
@@ -385,7 +385,7 @@
       "longitude": -108.5506,
       "url": "https://www.westernslopenow.com/live/",
       "enabled": false,
-      "note": "Grand Junction / Western Slope market. No live stream found on the page (Nexstar; the Denver and Colorado Springs Nexstar pages do stream). Paste a stream URL you are allowed to use to enable it."
+      "note": "Grand Junction / Western Slope market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it."
     },
     {
       "id": "kgwn",
@@ -398,7 +398,7 @@
       "longitude": -104.8202,
       "url": "https://www.wyomingnewsnow.tv/livestream/",
       "enabled": true,
-      "note": "Cheyenne market. Streams only during its newscasts; outside them the channel has nothing to play."
+      "note": "Cheyenne market. Streams only during its newscasts; at other times the channel shows a \"Nothing is streaming right now\" screen."
     },
     {
       "id": "kob",
@@ -450,7 +450,7 @@
       "longitude": -106.6504,
       "url": "https://www.krqe.com/live/",
       "enabled": false,
-      "note": "Albuquerque / Santa Fe market. No live stream found on the page (Nexstar; the Denver and Colorado Springs Nexstar pages do stream). Paste a stream URL you are allowed to use to enable it."
+      "note": "Albuquerque / Santa Fe market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it."
     }
   ]
 }

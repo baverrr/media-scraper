@@ -109,6 +109,34 @@ test('schedule fetches each team once per TTL and keeps old games when ESPN fail
   assert.deepEqual((await schedule.onAirNow(STATIONS)).map(p => p.station.id), ['kcnc']);
 });
 
+test('schedule: a failed fetch is retried after a minute, backing off, not after the whole TTL', async () => {
+  let now = T0;
+  let calls = 0;
+  let fail = true;
+  const schedule = new SportsSchedule({
+    teams: [{ league: 'nfl', team: 'den', name: 'Denver Broncos' }],
+    now: () => now,
+    fetchImpl: async () => { calls++; if (fail) throw new Error('fetch failed'); return { ok: true, json: async () => BRONCOS }; },
+  });
+  assert.equal((await schedule.events()).length, 0); // the network was down at start-up
+  now += 30_000;
+  await schedule.events();
+  assert.equal(calls, 1);
+  now += 31_000;
+  await schedule.events();
+  assert.equal(calls, 2); // retried after a minute
+  now += 61_000;
+  await schedule.events();
+  assert.equal(calls, 2); // the second failure waits two minutes
+  now += 60_000;
+  fail = false;
+  assert.equal((await schedule.events()).length, 2);
+  assert.equal(calls, 3);
+  now += 10 * 60_000;
+  await schedule.events();
+  assert.equal(calls, 3); // back to the normal TTL once it works
+});
+
 test('app: Local Sports channel leads the playlist and plays the station airing the game', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'lb-sports-'));
   const cdn = http.createServer((req, res) => {

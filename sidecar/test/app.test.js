@@ -6,7 +6,7 @@ import http from 'node:http';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createApp, ResolutionCache, semaphore } from '../src/app.js';
+import { createApp, ResolutionCache, semaphore, slatePlaylist, SLATE_SECONDS } from '../src/app.js';
 import { StationStore } from '../src/stations.js';
 
 let cdn, sidecar, cdnUrl, sideUrl, dataDir, app;
@@ -132,8 +132,10 @@ test('test endpoint reports failures with details instead of erroring', async ()
   const r = await (await fetch(`${sideUrl}/api/stations/dead/test`, { method: 'POST', headers: { 'x-api-key': 'secret' } })).json();
   assert.equal(r.ok, false);
   assert.match(r.error, /No live stream/);
-  const s = await (await fetch(`${sideUrl}/stream/dead.m3u8`)).json();
-  assert.match(s.error, /No live stream/);
+  // Tuning in plays the slate; the status still says why.
+  assert.match(await (await fetch(`${sideUrl}/stream/dead.m3u8`)).text(), /\.\.\/slate\/\d+\.ts/);
+  const status = await (await fetch(`${sideUrl}/api/status`)).json();
+  assert.match(status.find(x => x.id === 'dead').error, /No live stream/);
 });
 
 test('resolution cache: shares in-flight work, honours token expiry, remembers failures', async () => {
@@ -311,4 +313,51 @@ test('cache: a failed Test (keepOnFailure) leaves a playing stream alone', async
   await assert.rejects(cache.get({ id: 'a' }, { force: true, keepOnFailure: true }), /bot check/);
   assert.equal(cache.peek('a')?.url, 'https://cdn.example/1.m3u8');
   assert.equal((await cache.get({ id: 'a' })).url, 'https://cdn.example/1.m3u8');
+});
+
+test('a station with nothing to play gets the looping slate, an upstream failure still errors', async () => {
+  const marketsDir = path.join(dataDir, 'markets');
+  const store = new StationStore({ dataDir: path.join(dataDir, 'slate-data'), marketsDir, market: 'test' });
+  await store.load();
+  let mode = 'empty';
+  const resolver = {
+    async resolve() {
+      if (mode === 'empty') throw Object.assign(new Error('No live stream found on the page'), { details: { candidates: [] } });
+      return { url: `${cdnUrl}/master.m3u8?t=wrong`, type: 'hls', headers: { referer: 'https://station.example/live' }, via: 'page' };
+    },
+  };
+  const t = 1_800_000_000_000;
+  const local = createApp({ store, resolver, config: { failureSeconds: 0 }, log: {}, now: () => t });
+  const server = http.createServer(local.handler);
+  const url = await listen(server);
+  try {
+    let res = await fetch(`${url}/stream/test.m3u8`);
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    assert.equal(text, slatePlaylist(t, n => `../slate/${n}.ts`));
+    const seq = Math.floor(t / (SLATE_SECONDS * 1000));
+    assert.match(text, new RegExp(`#EXT-X-MEDIA-SEQUENCE:${seq}\\n`));
+    assert.equal(text.match(/#EXT-X-DISCONTINUITY\n/g).length, 3);
+    // The relative segment URL resolves to the slate clip.
+    res = await fetch(new URL(`../slate/${seq}.ts`, `${url}/stream/test.m3u8`));
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'video/mp2t');
+    assert.ok((await res.arrayBuffer()).byteLength > 10_000);
+    // A stream that was found but that upstream refuses is an error, not the slate.
+    mode = 'found';
+    local.cache.invalidate();
+    res = await fetch(`${url}/stream/test.m3u8`);
+    assert.equal(res.status, 502);
+  } finally {
+    server.close();
+  }
+});
+
+test('slate playlist moves on with the clock', () => {
+  const a = slatePlaylist(0, n => `${n}.ts`);
+  const b = slatePlaylist(SLATE_SECONDS * 1000, n => `${n}.ts`);
+  assert.match(a, /#EXT-X-MEDIA-SEQUENCE:0\n/);
+  assert.match(b, /#EXT-X-MEDIA-SEQUENCE:1\n/);
+  assert.deepEqual(b.match(/^\d+\.ts$/gm), ['1.ts', '2.ts', '3.ts']);
+  assert.doesNotMatch(a, /ENDLIST/);
 });

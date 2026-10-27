@@ -1,7 +1,7 @@
 ---
 name: "Local Broadcast"
 guid: "d0766040-c26a-4cc7-9c0b-c7064aa77001"
-version: "1.0.4.0"
+version: "1.0.5.0"
 targetAbi: "12.2.0.0"
 framework: "net10.0"
 overview: "Local TV stations' free web streams in Live TV, local sports first"
@@ -17,9 +17,10 @@ imageUrl: "https://raw.githubusercontent.com/baverrr/media-scraper/main/docs/ico
 artifacts:
 - "Jellyfin.Plugin.LocalBroadcast.dll"
 changelog: >
-  Coverage area: set a maximum distance and your location (or use this
-  device's location) to keep only nearby stations in Live TV; each station's
-  city and distance show in the settings. Stations set up by an earlier
-  version get their locations automatically.
-  KWGN CW2, KDVR FOX31 and KXRM FOX21 stream again (16 stations enabled); use
-  "Load this market's stations and teams" to turn them on.
+  Estrella TV (KETD) streams again from its new live page (17 stations
+  enabled; use "Load this market's stations and teams" to pick it up).
+  A station with nothing to play right now, such as one that streams only
+  during its newscasts, shows a "Nothing is streaming right now" screen
+  instead of a playback error. Test now names a bot check when a site shows
+  one. Team schedules that fail to load (after a restart, say) are retried
+  within minutes instead of half an hour.
