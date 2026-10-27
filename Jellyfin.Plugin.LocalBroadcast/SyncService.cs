@@ -126,7 +126,8 @@ public class SyncService : IHostedService, IDisposable
             // Compared with the last successful push, kept across restarts: stations changed while
             // Jellyfin was down (an upgrade that reseeds them, an edited settings file) refresh the
             // guide too.
-            var stationsChanged = result.SidecarOk && _lastStations.Update(stationsJson);
+            // "Keep streams ready" doesn't change the guide, so it doesn't count as a change.
+            var stationsChanged = result.SidecarOk && _lastStations.Update(stationsJson.Replace("\"keepReady\":true", "\"keepReady\":false", StringComparison.Ordinal));
 
             if (config.ManageLiveTv && result.SidecarOk && (refreshGuide || registered || stationsChanged))
             {

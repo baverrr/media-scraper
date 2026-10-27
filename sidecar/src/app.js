@@ -32,7 +32,8 @@ class HttpError extends Error {
 }
 
 // Concurrency limit with priorities: lower numbers run first (0 = a station airing a local game,
-// 1 = someone tuning in, 2 = background warm-up), FIFO within a priority. run.raise(promise, p)
+// 1 = someone tuning in, 2 = background warm-up), FIFO within a priority, and background jobs
+// leave a slot free. run.raise(promise, p)
 // moves a job still waiting up to priority p, for when someone tunes in to a station whose
 // background resolve is queued.
 export function semaphore(limit) {
@@ -40,12 +41,20 @@ export function semaphore(limit) {
   let seq = 0;
   const queue = [];
   const jobs = new WeakMap(); // promise -> its queued job
+  // Background jobs (priority 2 and up) never take the last free slot, so the warm-up alone can't
+  // keep tuning in or a local game waiting (with a limit of 1 they simply share it).
+  let background = 0;
   const next = () => {
-    if (active >= limit || !queue.length) return;
     queue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
-    active++;
-    const { fn, resolve, reject } = queue.shift();
-    fn().then(resolve, reject).finally(() => { active--; next(); });
+    while (active < limit) {
+      const i = queue.findIndex(j => j.priority < 2 || limit === 1 || background < limit - 1);
+      if (i < 0) return;
+      const [job] = queue.splice(i, 1);
+      const low = job.priority >= 2;
+      active++;
+      if (low) background++;
+      job.fn().then(job.resolve, job.reject).finally(() => { active--; if (low) background--; next(); });
+    }
   };
   const run = (fn, priority = 1) => {
     const job = { fn, priority, seq: seq++ };
@@ -57,7 +66,10 @@ export function semaphore(limit) {
   };
   run.raise = (promise, priority) => {
     const job = jobs.get(promise);
-    if (job && queue.includes(job) && priority < job.priority) job.priority = priority;
+    if (job && queue.includes(job) && priority < job.priority) {
+      job.priority = priority;
+      next(); // it may be able to start now (a background job held back by the cap)
+    }
   };
   return run;
 }
@@ -120,7 +132,7 @@ export class ResolutionCache {
     const pending = queued.then(
       value => {
         const until = this.expiryFor(value);
-        if (current()) this.entries.set(station.id, { value, until, usable: this.usableUntil(value, until) });
+        if (current()) this.entries.set(station.id, { value, until, usable: this.usableUntil(value, until), at: this.now() });
         return value;
       },
       error => {
@@ -152,6 +164,12 @@ export class ResolutionCache {
     if (entry?.pending) await entry.pending;
     const after = this.entries.get(station.id);
     if (after?.error) throw after.error;
+  }
+
+  // Whether the station's current stream was found less than `ms` ago.
+  resolvedWithin(id, ms) {
+    const e = this.entries.get(id);
+    return !!e?.value && !!e.at && this.now() - e.at < ms;
   }
 
   // Whether a failure is remembered (failureMs) and not retried yet.
@@ -235,6 +253,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
     ttlMs: (config.ttlMinutes ?? 30) * 60_000,
     failureMs: (config.failureSeconds ?? 60) * 1000,
     concurrency: config.concurrency ?? 2,
+    now,
   });
   // ffmpeg reloads the variant playlist every few seconds; the master behind it rarely changes.
   const masters = new Map();
@@ -289,10 +308,15 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
   }
 
   // Keeps "keep ready" stations resolved, so tuning in is instant: each due stream is refreshed in
-  // the background at the lowest priority (tuning in and local games go first). A station with
-  // nothing to play (one that streams only during newscasts) is tried again after 5 minutes,
-  // doubling up to an hour, rather than every minute. Called every minute by the server.
+  // the background at the lowest priority, one at a time and never in the last free slot, so tuning
+  // in and local games don't wait for it. A station with nothing to play (one that streams only
+  // during newscasts) is tried again after 5 minutes, doubling up to an hour, rather than every
+  // minute. Called every minute by the server.
+  // Whether a station changed in a way that matters for its stream ("keep ready" doesn't, so
+  // toggling it doesn't drop every playing stream).
+  const fingerprint = ({ keepReady, ...rest }) => JSON.stringify(rest);
   const warmBackoff = new Map(); // id -> { failures, until }
+  const WARM_MIN_GAP_MS = 10 * 60_000;
   async function warmStations() {
     const t = now();
     const stations = store.enabled().filter(s => s.keepReady && !sportsIds.has(s.id));
@@ -303,11 +327,19 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       // Not before the backoff, nor while someone else's failure is still remembered (that isn't a
       // new attempt, so it doesn't count toward the backoff either).
       if ((backoff && backoff.until > t) || cache.failedRecently(station.id)) return;
+      // Streams whose links expire within minutes aren't renewed in the background more often
+      // than every 10 minutes; tuning in still resolves them when needed.
+      if (cache.resolvedWithin(station.id, WARM_MIN_GAP_MS)) return;
+      // Edited meanwhile (not just sent again by a sync): this outcome was the old settings'.
+      const settings = fingerprint(station);
+      const edited = () => { const now = store.get(station.id); return !now || fingerprint(now) !== settings; };
       try {
         await cache.settle(station, { priority: 2 });
+        if (edited()) return;
         warmBackoff.delete(station.id);
         warmed.push(station.id);
       } catch {
+        if (edited()) return;
         const failures = (backoff?.failures ?? 0) + 1;
         warmBackoff.set(station.id, { failures, until: now() + Math.min(5 * 60_000 * 2 ** (failures - 1), 3_600_000) });
       }
@@ -508,9 +540,6 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
     if (p.startsWith('/api/') && !authorized(req)) throw new HttpError(401, 'missing or wrong X-Api-Key');
 
     if (method === 'PUT' && p === '/api/stations') {
-      // Whether a station changed in a way that matters for its stream ("keep ready" doesn't, so
-      // toggling it doesn't drop every playing stream).
-      const fingerprint = ({ keepReady, ...rest }) => JSON.stringify(rest);
       const before = new Map(store.stations.map(s => [s.id, fingerprint(s)]));
       let saved;
       try { saved = await store.save(await readJson(req)); } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, e.message); }

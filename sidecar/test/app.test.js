@@ -417,39 +417,145 @@ test('priority semaphore: a queued job can be moved up', async () => {
   assert.deepEqual(order, ['running', 'c', 'a', 'b']);
 });
 
-test('keep ready: a failed renewal of a still-playing stream backs off; toggling keep ready drops nothing', async () => {
+test('keep ready: renews on the TTL, backs off a failed renewal, skips cached failures and edits', async () => {
   const marketsDir = path.join(dataDir, 'markets');
   const store = new StationStore({ dataDir: path.join(dataDir, 'warm2-data'), marketsDir, market: 'test' });
   await store.load();
   await store.save([{ id: 'news', url: 'https://station.example/news', keepReady: true }]);
   let fail = false;
-  let calls = 0;
+  const calls = [];
+  let hold = null; // a promise the next resolve waits on
   const resolver = {
-    async resolve() {
-      calls++;
+    async resolve(station) {
+      calls.push(station.url);
+      if (hold) await hold;
       if (fail) throw Object.assign(new Error('No live stream found on the page'), { details: {} });
       return { url: `${cdnUrl}/master.m3u8?t=${token}`, type: 'hls', headers: {}, via: 'page' };
     },
   };
   let t = 1_800_000_000_000;
-  const local = createApp({ store, resolver, config: { apiKey: 'secret', ttlMinutes: 0.0001, failureSeconds: 0 }, log: {}, now: () => t });
+  const local = createApp({ store, resolver, config: { apiKey: 'secret', ttlMinutes: 30, failureSeconds: 60 }, log: {}, now: () => t });
+  assert.deepEqual(await local.warmStations(), ['news']);
+  assert.equal(calls.length, 1);
+  t += 29 * 60_000;
   await local.warmStations();
-  assert.equal(calls, 1);
-  fail = true;
-  await new Promise(r => setTimeout(r, 20)); // the TTL (6 ms) passes: due for renewal
-  assert.deepEqual(await local.warmStations(), []); // the renewal failed: not counted as warmed
-  t += 60_000;
-  await local.warmStations();
-  assert.equal(calls, 2); // backing off, though the old stream is still playable
+  assert.equal(calls.length, 1); // still fresh
+  t += 2 * 60_000;
+  assert.deepEqual(await local.warmStations(), ['news']); // past the TTL: renewed
+  assert.equal(calls.length, 2);
 
+  // A renewal that fails while the old stream still plays backs off (5 minutes).
+  t += 31 * 60_000;
+  fail = true;
+  assert.deepEqual(await local.warmStations(), []);
+  assert.equal(calls.length, 3);
+  t += 2 * 60_000;
+  await local.warmStations();
+  assert.equal(calls.length, 3);
+
+  // Someone else's failure, still remembered, is no new attempt: skipped, not counted.
+  t += 4 * 60_000; // backoff over
+  await local.cache.get(store.get('news'), { force: true }).catch(() => {}); // a viewer's tune-in fails
+  const before = calls.length;
+  await local.warmStations();
+  assert.equal(calls.length, before);
+
+  // An edit during a background resolve: the old resolve's failure doesn't hold the new URL back.
+  t += 2 * 60_000;
+  let release;
+  hold = new Promise(r => { release = r; });
+  const tick = local.warmStations();
+  await new Promise(r => setTimeout(r, 10));
   const server = http.createServer(local.handler);
   const url = await listen(server);
   try {
+    await fetch(`${url}/api/stations`, { method: 'PUT', headers: { 'x-api-key': 'secret' }, body: JSON.stringify([{ id: 'news', url: 'https://station.example/fixed', keepReady: true }]) });
+    hold = null;
+    release();
+    await tick;
     fail = false;
-    local.cache.invalidate();
-    await local.cache.get(store.get('news'));
-    await fetch(`${url}/api/stations`, { method: 'PUT', headers: { 'x-api-key': 'secret' }, body: JSON.stringify([{ id: 'news', url: 'https://station.example/news', keepReady: false }]) });
-    assert.ok(local.cache.peek('news')); // still playing
+    t += 60_000;
+    assert.deepEqual(await local.warmStations(), ['news']);
+    assert.equal(calls.at(-1), 'https://station.example/fixed');
+
+    // Toggling keep ready drops nothing that's playing.
+    await fetch(`${url}/api/stations`, { method: 'PUT', headers: { 'x-api-key': 'secret' }, body: JSON.stringify([{ id: 'news', url: 'https://station.example/fixed', keepReady: false }]) });
+    assert.ok(local.cache.peek('news'));
+  } finally {
+    server.close();
+  }
+});
+
+test('keep ready: a stream with short-lived links is renewed in the background at most every 10 minutes', async () => {
+  const marketsDir = path.join(dataDir, 'markets');
+  const store = new StationStore({ dataDir: path.join(dataDir, 'warm3-data'), marketsDir, market: 'test' });
+  await store.load();
+  await store.save([{ id: 'short', url: 'https://station.example/short', keepReady: true }]);
+  let t = 1_800_000_000_000;
+  let calls = 0;
+  // A token that expires 2 minutes after it's found.
+  const resolver = { async resolve() { calls++; return { url: `${cdnUrl}/master.m3u8?t=${token}`, type: 'hls', headers: {}, via: 'page', expiresAt: t + 120_000 }; } };
+  const local = createApp({ store, resolver, config: {}, log: {}, now: () => t });
+  for (let minute = 0; minute < 25; minute++) {
+    await local.warmStations();
+    t += 60_000;
+  }
+  assert.ok(calls <= 3, `${calls} renewals in 25 minutes`);
+});
+
+test('priority semaphore: background jobs leave a slot free for tuning in', async () => {
+  const run = semaphore(2);
+  const started = [];
+  const releases = [];
+  const job = (name, priority) => run(() => { started.push(name); return new Promise(r => releases.push(r)); }, priority);
+  job('warm-a', 2);
+  job('warm-b', 2);
+  job('warm-c', 2);
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(started, ['warm-a']); // one background page at a time
+  job('tune', 1);
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(started, ['warm-a', 'tune']); // started at once, in the free slot
+  releases.forEach(r => r());
+});
+
+test('priority semaphore: raising a background job held back by the cap starts it at once', async () => {
+  const run = semaphore(2);
+  const started = [];
+  const releases = [];
+  const job = (name, priority) => run(() => { started.push(name); return new Promise(r => releases.push(r)); }, priority);
+  job('warm-1', 2);
+  const x = job('warm-x', 2);
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(started, ['warm-1']);
+  run.raise(x, 1); // someone tunes in to X
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(started, ['warm-1', 'warm-x']);
+  releases.forEach(r => r());
+});
+
+test('keep ready: a sync that sends the same stations again doesn\'t discard a warm result', async () => {
+  const marketsDir = path.join(dataDir, 'markets');
+  const store = new StationStore({ dataDir: path.join(dataDir, 'warm4-data'), marketsDir, market: 'test' });
+  await store.load();
+  const list = [{ id: 'news', url: 'https://station.example/news', keepReady: true }];
+  await store.save(list);
+  let release;
+  let calls = 0;
+  const resolver = { async resolve() { calls++; await new Promise(r => { release = r; }); throw Object.assign(new Error('No live stream found on the page'), { details: {} }); } };
+  let t = 1_800_000_000_000;
+  const local = createApp({ store, resolver, config: { apiKey: 'secret', failureSeconds: 0 }, log: {}, now: () => t });
+  const server = http.createServer(local.handler);
+  const url = await listen(server);
+  try {
+    const tick = local.warmStations();
+    await new Promise(r => setTimeout(r, 10));
+    await fetch(`${url}/api/stations`, { method: 'PUT', headers: { 'x-api-key': 'secret' }, body: JSON.stringify(list) });
+    release();
+    await tick;
+    t += 60_000;
+    await local.warmStations();
+    assert.equal(calls, 1); // the failure counted: backing off
   } finally {
     server.close();
   }

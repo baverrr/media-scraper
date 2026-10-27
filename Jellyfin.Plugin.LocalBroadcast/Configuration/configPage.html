@@ -35,7 +35,7 @@
                             <input is="emby-checkbox" type="checkbox" id="lbKeepReady" />
                             <span>Keep streams ready</span>
                         </label>
-                        <div class="fieldDescription checkboxFieldDescription">Tune in within a second instead of waiting 15 to 20 seconds: the sidecar finds every enabled station's stream ahead of time and renews it before it expires, in the background, two stations at a time. That runs Chrome for a few minutes about every half hour (more often for stations whose stream links expire sooner), so it uses more CPU and memory. A station with nothing to play right now is checked less and less often, and still takes the usual time to show its "Nothing is streaming" screen.</div>
+                        <div class="fieldDescription checkboxFieldDescription">Tune in within a second instead of waiting 15 to 20 seconds: the sidecar finds every enabled station's stream ahead of time and renews it before it expires, in the background, one station at a time, never filling every slot, so tuning in doesn't wait for it. That runs Chrome for a few minutes about every half hour (every 10 minutes at most for stations whose stream links expire sooner), so it uses more CPU and memory. A station with nothing to play right now is checked less and less often, and still takes the usual time to show its "Nothing is streaming" screen.</div>
                     </div>
                     <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
                     <button is="emby-button" type="button" class="raised block emby-button" id="lbSync"><span>Sync now</span></button>
