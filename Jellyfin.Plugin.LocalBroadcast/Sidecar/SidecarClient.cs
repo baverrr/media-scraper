@@ -80,6 +80,8 @@ public class SidecarClient
                 network = s.Network,
                 url = s.Url,
                 streamUrl = string.IsNullOrWhiteSpace(s.StreamUrl) ? null : s.StreamUrl.Trim(),
+                signInUrl = string.IsNullOrWhiteSpace(s.SignInUrl) ? null : s.SignInUrl.Trim(),
+                signUpUrl = string.IsNullOrWhiteSpace(s.SignUpUrl) ? null : s.SignUpUrl.Trim(),
                 logo = string.IsNullOrWhiteSpace(s.Logo) ? null : s.Logo,
                 sportsAliases = (s.SportsAliases ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
                 note,
@@ -166,6 +168,72 @@ public class SidecarClient
         using var request = new HttpRequestMessage(HttpMethod.Get, RequestUri(config, "/api/status"));
         return await SendAsync(config, request, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Gets the stations that have a saved sign-in: email, when it last signed in, and the last
+    /// problem. Never the password.
+    /// </summary>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The sidecar's sign-in list.</returns>
+    public async Task<JsonElement> LoginsAsync(PluginConfiguration config, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, RequestUri(config, "/api/logins"));
+        return await SendAsync(config, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Saves a station's sign-in in the sidecar, which keeps it encrypted.
+    /// </summary>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="stationId">The station id.</param>
+    /// <param name="username">The email or username.</param>
+    /// <param name="password">The password.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The sign-in's status.</returns>
+    public async Task<JsonElement> SetLoginAsync(PluginConfiguration config, string stationId, string username, string password, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, RequestUri(config, LoginPath(stationId)))
+        {
+            Content = JsonContent.Create(new { username, password }, options: JsonOptions),
+        };
+        return await SendAsync(config, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Creates an account on the station's site through its sign-up form (only a plain one: no
+    /// CAPTCHA, nothing asked but the email and password), and saves it as the station's sign-in.
+    /// </summary>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="stationId">The station id.</param>
+    /// <param name="username">The email the person chose.</param>
+    /// <param name="password">The password the person chose.</param>
+    /// <param name="acceptTerms">Whether the person accepted the site's terms.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The outcome (ok, confirmEmail or error).</returns>
+    public async Task<JsonElement> SignUpAsync(PluginConfiguration config, string stationId, string username, string password, bool acceptTerms, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, RequestUri(config, "/api/stations/" + Uri.EscapeDataString(stationId.Trim().ToLowerInvariant()) + "/signup"))
+        {
+            Content = JsonContent.Create(new { username, password, acceptTerms }, options: JsonOptions),
+        };
+        return await SendAsync(config, request, cancellationToken, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Removes a station's sign-in from the sidecar.
+    /// </summary>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="stationId">The station id.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The sign-in's status.</returns>
+    public async Task<JsonElement> RemoveLoginAsync(PluginConfiguration config, string stationId, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, RequestUri(config, LoginPath(stationId)));
+        return await SendAsync(config, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string LoginPath(string stationId) => "/api/stations/" + Uri.EscapeDataString(stationId.Trim().ToLowerInvariant()) + "/login";
 
     private async Task<JsonElement> SendAsync(PluginConfiguration config, HttpRequestMessage request, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {

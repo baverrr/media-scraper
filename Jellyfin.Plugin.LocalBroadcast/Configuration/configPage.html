@@ -116,6 +116,14 @@
                         <div class="fieldDescription">Use this instead of scraping the page: a live <code>.m3u8</code>/<code>.mpd</code> URL that doesn't expire, or a page yt-dlp supports (e.g. the station's YouTube live). Only use streams you're allowed to watch.</div>
                     </div>
                     <div class="inputContainer">
+                        <input is="emby-input" type="url" id="lbSignInUrl" label="Sign-in page URL (optional)" />
+                        <div class="fieldDescription">For a station that streams only to signed-in (free) accounts: the page with the site's sign-in form. Empty uses the live-stream page.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="url" id="lbSignUpUrl" label="Account sign-up page URL (optional)" />
+                        <div class="fieldDescription">Where to create an account on the station's site, linked from the sign-in box below.</div>
+                    </div>
+                    <div class="inputContainer">
                         <input is="emby-input" type="text" id="lbAliases" label="Sports aliases (optional)" placeholder="Altitude Sports" />
                         <div class="fieldDescription">Other broadcaster names, comma separated, that mean a game airs on this station.</div>
                     </div>
@@ -137,6 +145,29 @@
                     <button is="emby-button" type="submit" class="raised button-submit block emby-button" id="lbSubmit"><span>Add station</span></button>
                     <button is="emby-button" type="button" class="raised block emby-button hide" id="lbCancel"><span>Cancel edit</span></button>
                 </form>
+                <form id="lbLoginBox" class="hide" autocomplete="off" style="border:1px solid rgba(128,128,128,.4);border-radius:6px;padding:1em;margin:1em 0 1.5em;">
+                    <h3 style="margin-top:0;">Sign-in for this station</h3>
+                    <div class="fieldDescription" style="margin-bottom:1em;">For a station that streams only to signed-in accounts. The sidecar keeps the email and password encrypted and signs in through the site's form; Jellyfin doesn't store them. It stops at a CAPTCHA or an emailed login code, so sites that use those can't be signed in to automatically.</div>
+                    <div class="fieldDescription" id="lbSignUp" style="margin-bottom:1em;">No account yet? Enter the email and password you want, tick the box below once you've read <a is="emby-linkbutton" class="button-link" id="lbSignUpLink" target="_blank" rel="noopener noreferrer" href="#">the station's site and its terms</a>, and use <b>Create the account for me</b>. That works when the site's sign-up form asks only for an email and password; if it has a CAPTCHA or asks for more, create the account on the site yourself and save the sign-in here. Any confirmation email is yours to open.</div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="email" id="lbLoginUser" name="station-account" label="Email or username" autocomplete="off" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="password" id="lbLoginPass" name="station-password" label="Password" autocomplete="new-password" />
+                    </div>
+                    <div class="checkboxContainer" id="lbTermsBox">
+                        <label>
+                            <input is="emby-checkbox" type="checkbox" id="lbAcceptTerms" />
+                            <span>I've read and accept the site's terms (for creating an account)</span>
+                        </label>
+                    </div>
+                    <div style="display:flex;gap:.5em;flex-wrap:wrap;">
+                        <button is="emby-button" type="submit" class="raised button-submit emby-button" id="lbLoginSave"><span>Save sign-in</span></button>
+                        <button is="emby-button" type="button" class="raised emby-button" id="lbSignUpBtn"><span>Create the account for me</span></button>
+                        <button is="emby-button" type="button" class="raised emby-button" id="lbLoginRemove"><span>Remove sign-in</span></button>
+                    </div>
+                    <div class="fieldDescription" id="lbLoginStatus" aria-live="polite"></div>
+                </form>
 
                 <div id="lbList" class="paperList" style="margin-top:1em;"></div>
                 <p id="lbEmpty" class="fieldDescription">No stations.</p>
@@ -156,6 +187,10 @@
                 var page = document.querySelector('#LocalBroadcastConfigPage');
                 var config = { Stations: [], Teams: [] };
                 var status = {};
+                // Stations with a saved sign-in, by id: email, last sign-in, last problem.
+                var logins = {};
+                // A sign-in or sign-up request is running: status refreshes leave the box alone.
+                var loginBusy = false;
                 var airing = {};
                 var center = null;
 
@@ -171,8 +206,13 @@
                     try { return /^https?:$/.test(new URL(text).protocol); } catch (e) { return false; }
                 }
 
-                function api(type, path) {
-                    return ApiClient.ajax({ type: type, url: ApiClient.getUrl('LocalBroadcast/' + path), dataType: 'json' });
+                function api(type, path, data) {
+                    var options = { type: type, url: ApiClient.getUrl('LocalBroadcast/' + path), dataType: 'json' };
+                    if (data !== undefined) {
+                        options.data = JSON.stringify(data);
+                        options.contentType = 'application/json';
+                    }
+                    return ApiClient.ajax(options);
                 }
 
                 function label(s) {
@@ -270,6 +310,12 @@
                         var title = label(s) + (s.Network ? '  -  ' + s.Network : '') + (where ? '  -  ' + where : '') + (airing[s.Id] ? '  -  ON NOW: ' + airing[s.Id] : '');
                         var r = textRow([title, s.StreamUrl ? s.Url + '  (stream: ' + s.StreamUrl + ')' : s.Url, ''], [], !s.Enabled || !inRange(s));
                         var d = describeState(s);
+                        var login = logins[s.Id];
+                        if (login) {
+                            d = [d[0] + '  Sign-in: ' + (login.error ? 'failed: ' + login.error
+                                : login.signedInAt ? 'signed in as ' + login.username + '.'
+                                    : 'saved for ' + login.username + ', signs in when first played.'), login.error ? false : d[1]];
+                        }
                         setLine(r.lines[2], d[0], d[1]);
                         r.lines[2].setAttribute('aria-live', 'polite');
                         r.row.appendChild(iconButton('network_check', 'Test now', function () { runTest(s, r.lines[2]); }));
@@ -295,7 +341,33 @@
                     });
                 }
 
+                function refreshLogins() {
+                    api('GET', 'Logins').then(function (r) {
+                        logins = {};
+                        (r.logins || []).forEach(function (l) { logins[l.id] = l; });
+                        render();
+                        showLogin();
+                    }, function () { /* the status line already says when the sidecar is unreachable */ });
+                }
+
+                // The sign-in box is for a saved station (it saves straight to the sidecar).
+                function showLogin() {
+                    var id = $('lbEditId').value;
+                    $('lbLoginBox').classList.toggle('hide', !id);
+                    if (!id || loginBusy) return;
+                    var station = config.Stations.find(function (x) { return x.Id === id; });
+                    var signUp = station && isHttpUrl(station.SignUpUrl || '') ? station.SignUpUrl : null;
+                    ['lbSignUp', 'lbTermsBox', 'lbSignUpBtn'].forEach(function (el) { $(el).classList.toggle('hide', !signUp); });
+                    if (signUp) $('lbSignUpLink').href = signUp;
+                    var l = logins[id];
+                    setLine($('lbLoginStatus'), !l ? 'No sign-in saved.'
+                        : l.error ? 'Last sign-in failed: ' + l.error
+                            : l.signedInAt ? 'Signed in as ' + l.username + ' (' + new Date(l.signedInAt).toLocaleString() + ').'
+                                : 'Saved for ' + l.username + '. The sidecar signs in when the station is next played or tested.', l ? (l.error ? false : true) : null);
+                }
+
                 function refreshStatus() {
+                    refreshLogins();
                     api('GET', 'Status').then(function (r) {
                         status = {};
                         if (r.reachable) {
@@ -408,6 +480,11 @@
                 function resetForm() {
                     $('lbStationForm').reset();
                     $('lbEditId').value = '';
+                    $('lbSignInUrl').value = '';
+                    $('lbSignUpUrl').value = '';
+                    $('lbLoginUser').value = '';
+                    $('lbLoginPass').value = '';
+                    showLogin();
                     $('lbSubmit').querySelector('span').textContent = 'Add station';
                     $('lbCancel').classList.add('hide');
                 }
@@ -422,6 +499,12 @@
                     $('lbNetwork').value = s.Network || '';
                     $('lbUrl').value = s.Url || '';
                     $('lbStreamUrl').value = s.StreamUrl || '';
+                    $('lbSignInUrl').value = s.SignInUrl || '';
+                    $('lbSignUpUrl').value = s.SignUpUrl || '';
+                    $('lbLoginUser').value = logins[s.Id] ? logins[s.Id].username : '';
+                    $('lbLoginPass').value = '';
+                    $('lbAcceptTerms').checked = false;
+                    showLogin();
                     $('lbAliases').value = s.SportsAliases || '';
                     $('lbLogo').value = s.Logo || '';
                     $('lbCity').value = s.City || '';
@@ -436,6 +519,8 @@
                     var s = config.Stations.find(function (x) { return x.Id === id; });
                     if (!s || !confirm('Delete "' + label(s) + '"?')) return;
                     config.Stations = config.Stations.filter(function (x) { return x.Id !== id; });
+                    // Its saved sign-in goes with it (the sidecar keeps sign-ins through syncs).
+                    if (logins[id]) api('DELETE', 'Stations/' + encodeURIComponent(id) + '/Login').then(refreshLogins, function () { });
                     save();
                 }
 
@@ -528,11 +613,76 @@
                     });
                 });
 
+                $('lbLoginBox').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    var id = $('lbEditId').value;
+                    var user = $('lbLoginUser').value.trim();
+                    var pass = $('lbLoginPass').value;
+                    if (!id) return;
+                    if (!user || !pass) {
+                        Dashboard.alert('Enter the account\'s email and password.');
+                        return;
+                    }
+                    setLine($('lbLoginStatus'), 'Saving...', null);
+                    loginBusy = true;
+                    api('POST', 'Stations/' + encodeURIComponent(id) + '/Login', { Username: user, Password: pass }).then(function (r) {
+                        loginBusy = false;
+                        $('lbLoginPass').value = '';
+                        if (!r.ok) { setLine($('lbLoginStatus'), r.error, false); return; }
+                        refreshLogins();
+                        Dashboard.alert('Sign-in saved. If you haven\'t yet, save this email and password in your password manager: the sidecar keeps them encrypted and never shows the password again.');
+                    }, function () { loginBusy = false; setLine($('lbLoginStatus'), 'Could not save the sign-in.', false); });
+                    return false;
+                });
+
+                $('lbSignUpBtn').addEventListener('click', function () {
+                    var id = $('lbEditId').value;
+                    var user = $('lbLoginUser').value.trim();
+                    var pass = $('lbLoginPass').value;
+                    if (!id) return;
+                    if (!user || !pass) {
+                        Dashboard.alert('Enter the email and the password you want for the new account.');
+                        return;
+                    }
+                    if (!$('lbAcceptTerms').checked) {
+                        Dashboard.alert('Read the site\'s terms and tick "I\'ve read and accept the site\'s terms" first.');
+                        return;
+                    }
+                    setLine($('lbLoginStatus'), 'Creating the account on the station\'s site (up to a minute)...', null);
+                    loginBusy = true;
+                    api('POST', 'Stations/' + encodeURIComponent(id) + '/SignUp', { Username: user, Password: pass, AcceptTerms: true }).then(function (r) {
+                        loginBusy = false;
+                        if (!r.ok) { setLine($('lbLoginStatus'), r.error, false); return; }
+                        refreshLogins();
+                        if (r.error) {
+                            // Created, but not saved: keep the password in the box so it can be saved.
+                            setLine($('lbLoginStatus'), r.error, false);
+                            Dashboard.alert(r.error + ' Save this email and password in your password manager now.');
+                            return;
+                        }
+                        $('lbLoginPass').value = '';
+                        Dashboard.alert('Account created' + (r.confirmEmail ? '. The site sent a confirmation email to ' + user + ': open it and confirm the account, then use Test now on the station.' : ' and signed in.')
+                            + ' Save this email and password in your password manager now: the sidecar keeps them encrypted and never shows the password again.');
+                    }, function () { loginBusy = false; setLine($('lbLoginStatus'), 'Could not create the account.', false); });
+                });
+
+                $('lbLoginRemove').addEventListener('click', function () {
+                    var id = $('lbEditId').value;
+                    if (!id || !logins[id] || !confirm('Remove the saved sign-in for this station?')) return;
+                    api('DELETE', 'Stations/' + encodeURIComponent(id) + '/Login').then(function (r) {
+                        if (!r.ok) { setLine($('lbLoginStatus'), r.error, false); return; }
+                        $('lbLoginUser').value = '';
+                        refreshLogins();
+                    }, function () { setLine($('lbLoginStatus'), 'Could not remove the sign-in.', false); });
+                });
+
                 $('lbStationForm').addEventListener('submit', function (e) {
                     e.preventDefault();
                     var url = $('lbUrl').value.trim();
                     var streamUrl = $('lbStreamUrl').value.trim();
-                    if (!isHttpUrl(url) || (streamUrl && !isHttpUrl(streamUrl))) {
+                    var signInUrl = $('lbSignInUrl').value.trim();
+                    var signUpUrl = $('lbSignUpUrl').value.trim();
+                    if (!isHttpUrl(url) || [streamUrl, signInUrl, signUpUrl].some(function (u) { return u && !isHttpUrl(u); })) {
                         Dashboard.alert('Enter full URLs starting with http:// or https://');
                         return false;
                     }
@@ -565,6 +715,8 @@
                         Network: $('lbNetwork').value.trim(),
                         Url: url,
                         StreamUrl: streamUrl || null,
+                        SignInUrl: signInUrl || null,
+                        SignUpUrl: signUpUrl || null,
                         SportsAliases: $('lbAliases').value.trim() || null,
                         Logo: $('lbLogo').value.trim() || null,
                         City: $('lbCity').value.trim() || null,

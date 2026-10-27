@@ -132,7 +132,7 @@ public class SidecarClientTests
         var json = JsonSerializer.Serialize(
             SidecarClient.ToSidecarStations(new PluginConfiguration { Stations = { new Station { Id = " KUSA ", CallSign = "KUSA", Name = "9NEWS", Url = "https://x", Logo = " " } } }),
             SidecarClient.JsonOptions);
-        Assert.Equal("""[{"id":"kusa","callSign":"KUSA","name":"9NEWS","channel":"","network":"","url":"https://x","streamUrl":null,"logo":null,"sportsAliases":[],"note":null,"enabled":true}]""", json);
+        Assert.Equal("""[{"id":"kusa","callSign":"KUSA","name":"9NEWS","channel":"","network":"","url":"https://x","streamUrl":null,"signInUrl":null,"signUpUrl":null,"logo":null,"sportsAliases":[],"note":null,"enabled":true}]""", json);
     }
 
     [Fact]

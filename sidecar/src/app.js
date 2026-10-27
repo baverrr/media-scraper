@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { timingSafeEqual } from 'node:crypto';
 import { buildM3u, buildXmltv, sportsChannel, SPORTS_ID } from './guide.js';
 import { createSigner } from './sign.js';
+import { normalizeLogin } from './logins.js';
 import { isHls, isMaster, rewriteMaster, rewriteMedia, chosenVariantUrl, renditionUrls, proxyExtension } from './hls.js';
 
 // "Nothing is streaming right now": a 6-second clip (assets/slate.svg encoded with ffmpeg) played in
@@ -158,12 +159,46 @@ export class ResolutionCache {
   }
 }
 
-export function createApp({ store, resolver, sports = null, config = {}, log = console, fetchImpl = fetch, now = Date.now }) {
+// logins: the LoginStore holding stations' sign-ins (optional).
+export function createApp({ store, resolver, sports = null, logins = null, config = {}, log = console, fetchImpl = fetch, now = Date.now }) {
   const maxHeight = config.maxHeight ?? 1080;
   const apiKey = config.apiKey || '';
   const signer = createSigner();
+
+  // What the resolver gets for a station with a saved sign-in: the account, its session, and
+  // callbacks that store how signing in went, for this account only (one saved meanwhile replaces
+  // it, and the old one's outcome is dropped).
+  const SIGN_IN_GAP_MS = 10 * 60_000;
+  const lastSignIn = new Map();
+  function loginFor(station) {
+    const entry = logins?.get(station.id);
+    if (!entry) return null;
+    return {
+      username: entry.username,
+      password: entry.password,
+      session: entry.session,
+      // Why not to sign in now, or null: a failed sign-in waits until it's saved again or tested,
+      // and signing in happens at most every 10 minutes, so a player retrying can't lock the
+      // account or have the site email a code each time.
+      mayAttempt: () => {
+        if (!logins.current(station.id, entry)) return 'the sign-in was changed meanwhile';
+        const retry = entry.retry;
+        entry.retry = false;
+        if (entry.error && !retry) return `the last sign-in failed (${entry.error}); save the sign-in again or use Test now to try again`;
+        const last = lastSignIn.get(station.id);
+        if (!retry && last && now() - last < SIGN_IN_GAP_MS) return 'signed in less than 10 minutes ago; waiting before signing in again';
+        lastSignIn.set(station.id, now());
+        return null;
+      },
+      signedIn: session => logins.signedIn(station.id, session, entry),
+      saveSession: session => logins.saveSession(station.id, session, entry),
+      forgetSession: () => logins.forgetSession(station.id, entry),
+      failed: message => logins.failed(station.id, message, entry),
+    };
+  }
+
   const cache = new ResolutionCache({
-    resolve: station => resolver.resolve(station),
+    resolve: station => resolver.resolve(station, loginFor(station)),
     ttlMs: (config.ttlMinutes ?? 30) * 60_000,
     failureMs: (config.failureSeconds ?? 60) * 1000,
     concurrency: config.concurrency ?? 2,
@@ -283,9 +318,9 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
       pl = await loadPlaylist(station, which);
     } catch (e) {
       // The station's page had nothing to play (a resolver failure, not an upstream error on a
-      // stream that was found): play the slate. Retuning tries the page again once the failure
-      // has been remembered for its minute.
-      if (which.kind !== 'root' || e instanceof HttpError || !e.details || config.slate === false) throw e;
+      // stream that was found, nor a failed sign-in, which needs fixing): play the slate.
+      // Retuning tries the page again once the failure has been remembered for its minute.
+      if (which.kind !== 'root' || e instanceof HttpError || !e.details || e.details.signIn || config.slate === false) throw e;
       log.info?.(`[${station.id}] nothing to play (${e.message}); playing the slate`);
       return send(res, 200, slatePlaylist(now(), n => `../slate/${n}.ts`), 'application/vnd.apple.mpegurl');
     }
@@ -406,6 +441,8 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
       let saved;
       try { saved = await store.save(await readJson(req)); } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, e.message); }
       for (const s of saved) if (before.get(s.id) !== JSON.stringify(s)) { cache.invalidate(s.id); masters.delete(s.id); }
+      // A station's sign-in stays when it leaves the list (the plugin removes it when the station
+      // is deleted), so a sync with a partial list can't lose accounts.
       for (const id of before.keys()) if (!store.get(id)) { cache.invalidate(id); masters.delete(id); }
       log.info?.(`stations updated: ${saved.length} (${saved.filter(s => s.enabled).length} enabled)`);
       return send(res, 200, saved);
@@ -417,9 +454,63 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
       log.info?.(`sports updated: ${saved.enabled ? 'on' : 'off'}, ${saved.teams.length} teams, channel ${saved.channel}`);
       return send(res, 200, saved);
     }
+    // Sign-ins: write-only. The email shows in the status; the password and session never leave.
+    if (method === 'GET' && p === '/api/logins') {
+      return send(res, 200, store.stations.filter(s => logins?.get(s.id)).map(s => ({ id: s.id, ...logins.status(s.id) })));
+    }
+    if ((m = p.match(/^\/api\/stations\/([^/]+)\/login$/)) && (method === 'PUT' || method === 'DELETE')) {
+      if (!logins) throw new HttpError(404, 'sign-ins are not available');
+      const id = decodeURIComponent(m[1]).toLowerCase();
+      let status;
+      if (method === 'PUT') {
+        stationOr404(id, { requireEnabled: false });
+        try { status = await logins.set(id, await readJson(req, 10_000)); } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, e.message); }
+        lastSignIn.delete(id);
+        log.info?.(`[${id}] sign-in saved`);
+      } else {
+        await logins.remove(id);
+        status = logins.status(id);
+        log.info?.(`[${id}] sign-in removed`);
+      }
+      cache.invalidate(id);
+      masters.delete(id);
+      return send(res, 200, { id, ...status });
+    }
+
+    // Creates the account on the station's site with the email and password the person chose, and
+    // saves it as the station's sign-in. acceptTerms says the person accepted the site's terms.
+    if ((m = p.match(/^\/api\/stations\/([^/]+)\/signup$/)) && method === 'POST') {
+      if (!logins || !resolver.signUp) throw new HttpError(404, 'sign-ins are not available');
+      const station = stationOr404(decodeURIComponent(m[1]), { requireEnabled: false });
+      let raw, account;
+      try {
+        raw = await readJson(req, 10_000);
+        account = normalizeLogin(raw);
+      } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, e.message); }
+      let r;
+      try {
+        r = await resolver.signUp(station, { ...account, acceptTerms: raw.acceptTerms === true });
+      } catch (e) {
+        return send(res, 200, { ok: false, id: station.id, error: e.message });
+      }
+      // The account exists now; saving it here failing doesn't undo that.
+      try {
+        await logins.set(station.id, account);
+        if (!r.confirmEmail) await logins.signedIn(station.id, r.session);
+      } catch (e) {
+        log.warn?.(`[${station.id}] account created, but saving the sign-in failed: ${e.message}`);
+        return send(res, 200, { ok: true, id: station.id, confirmEmail: r.confirmEmail, configured: false, error: `The account was created, but saving the sign-in failed (${e.message}); save it with Save sign-in.` });
+      }
+      lastSignIn.delete(station.id);
+      cache.invalidate(station.id);
+      return send(res, 200, { ok: true, id: station.id, confirmEmail: r.confirmEmail, ...logins.status(station.id) });
+    }
+
     if ((m = p.match(/^\/api\/stations\/([^/]+)\/test$/)) && method === 'POST') {
       const station = stationOr404(decodeURIComponent(m[1]), { requireEnabled: false });
       try {
+        // Test now is how a person tries a failed sign-in again.
+        logins?.allowRetry(station.id);
         // A failed test (an ad slate, a bot check) leaves a stream that's playing alone.
         const r = await cache.get(station, { force: true, keepOnFailure: true });
         return send(res, 200, {
@@ -438,7 +529,7 @@ export function createApp({ store, resolver, sports = null, config = {}, log = c
     try {
       await route(req, res);
     } catch (e) {
-      const status = e instanceof HttpError ? e.status : (e.details ? 502 : 500);
+      const status = e instanceof HttpError ? e.status : e instanceof URIError ? 400 : (e.details ? 502 : 500);
       if (status >= 500) log.warn?.(`${req.method} ${req.url}: ${e.message}`);
       if (!res.headersSent) send(res, status, { error: e.message, details: e.details });
       else res.destroy();
