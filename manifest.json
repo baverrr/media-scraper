@@ -2,6 +2,14 @@
   {
     "versions": [
       {
+        "version": "1.0.2.0",
+        "changelog": "Wider coverage: the Denver market now reaches every TV market covering part of Colorado plus Cheyenne (30 stations, 13 enabled, up from 6), including Gray Television stations such as KKTV 11, whose streams now play (also behind DNS ad blockers). Local games prefer Denver stations. Use \"Load this market's stations and teams\" in the settings to get the new stations.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/baverrr/media-scraper/releases/download/v1.0.2/local-broadcast_1.0.2.0.zip",
+        "checksum": "db75f3c56c6147fb4495e793b181c8f0",
+        "timestamp": "2026-10-27T01:05:55Z"
+      },
+      {
         "version": "1.0.1.0",
         "changelog": "Bug fixes: streams no longer stall at each refresh, a failed Test leaves a playing channel alone, sturdier settings page (clear errors for a wrong sidecar URL or API key), Local Sports guide starts with the pre-game, and better stream detection on station pages.",
         "targetAbi": "12.2.0.0",
