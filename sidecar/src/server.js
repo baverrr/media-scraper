@@ -72,7 +72,12 @@ server.keepAliveTimeout = 65_000;
 server.headersTimeout = 66_000;
 
 // Keep streams for stations airing local games resolved ahead of time.
-const warmer = setInterval(() => { app.warmSports().catch(e => log.warn(`sports warm-up: ${e.message}`)); }, 60_000);
+const warmer = setInterval(() => {
+  app.warmSports()
+    .catch(e => log.warn(`sports warm-up: ${e.message}`))
+    .then(() => app.warmStations())
+    .catch(e => log.warn(`warm-up: ${e.message}`));
+}, 60_000);
 warmer.unref();
 server.listen(config.port, config.host, () => {
   log.info(`local-broadcast sidecar on ${config.host}:${config.port}, ${store.enabled().length} stations enabled (market ${config.market}), sports ${store.sports.enabled ? `on (${store.sports.teams.length} teams)` : 'off'}${config.apiKey ? '' : ' (no API_KEY set: station changes are unauthenticated)'}`);

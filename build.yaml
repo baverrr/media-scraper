@@ -1,7 +1,7 @@
 ---
 name: "Local Broadcast"
 guid: "d0766040-c26a-4cc7-9c0b-c7064aa77001"
-version: "1.0.6.0"
+version: "1.0.7.0"
 targetAbi: "12.2.0.0"
 framework: "net10.0"
 overview: "Local TV stations' free web streams in Live TV, local sports first"
@@ -17,8 +17,11 @@ imageUrl: "https://raw.githubusercontent.com/baverrr/media-scraper/main/docs/ico
 artifacts:
 - "Jellyfin.Plugin.LocalBroadcast.dll"
 changelog: >
-  Station sign-ins: for a station that streams only to signed-in (free)
-  accounts, save the account in the station's settings, or have the account
-  created for you when the site's sign-up form asks only for an email and
-  password. The sidecar keeps it encrypted, signs in through the site's form,
-  and stops at a CAPTCHA. Any confirmation email is yours to open.
+  Keep streams ready: a new setting has the sidecar find every enabled
+  station's stream ahead of time and renew it in the background, so tuning in
+  is instant instead of taking 15 to 20 seconds. A station with nothing to
+  play is checked less and less often. KOAT 7 streams its newscasts from
+  its NowCast page, and ION (KPXC) plays ION's national feed from its free
+  Pluto TV channel (19 stations enabled; use "Load this market's stations
+  and teams" to pick them up). Setup steps for Windows (PowerShell) and macOS
+  in the README.

@@ -31,12 +31,15 @@ class HttpError extends Error {
   }
 }
 
-// Concurrency limit with priorities: lower numbers run first (0 = a station airing a local game),
-// FIFO within a priority.
+// Concurrency limit with priorities: lower numbers run first (0 = a station airing a local game,
+// 1 = someone tuning in, 2 = background warm-up), FIFO within a priority. run.raise(promise, p)
+// moves a job still waiting up to priority p, for when someone tunes in to a station whose
+// background resolve is queued.
 export function semaphore(limit) {
   let active = 0;
   let seq = 0;
   const queue = [];
+  const jobs = new WeakMap(); // promise -> its queued job
   const next = () => {
     if (active >= limit || !queue.length) return;
     queue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
@@ -44,7 +47,19 @@ export function semaphore(limit) {
     const { fn, resolve, reject } = queue.shift();
     fn().then(resolve, reject).finally(() => { active--; next(); });
   };
-  return (fn, priority = 1) => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject, priority, seq: seq++ }); next(); });
+  const run = (fn, priority = 1) => {
+    const job = { fn, priority, seq: seq++ };
+    const promise = new Promise((resolve, reject) => { Object.assign(job, { resolve, reject }); });
+    jobs.set(promise, job);
+    queue.push(job);
+    next();
+    return promise;
+  };
+  run.raise = (promise, priority) => {
+    const job = jobs.get(promise);
+    if (job && queue.includes(job) && priority < job.priority) job.priority = priority;
+  };
+  return run;
 }
 
 // Resolutions per station: reused until the configured TTL or the URL's own token expiry
@@ -91,14 +106,18 @@ export class ResolutionCache {
     const now = this.now();
     const entry = this.entries.get(station.id);
     const stale = !force && entry?.value && entry.usable > now ? entry.value : null;
-    if (entry?.pending) return stale ? Promise.resolve(stale) : entry.pending;
+    if (entry?.pending) {
+      this.limit.raise(entry.queued, priority);
+      return stale ? Promise.resolve(stale) : entry.pending;
+    }
     if (!force && entry && entry.until > now) {
       return entry.error && !entry.value ? Promise.reject(entry.error) : Promise.resolve(entry.value);
     }
     // Only store the outcome if this resolution is still the current one: a station edited (and
     // invalidated) mid-resolve mustn't get the old page's stream cached for the whole TTL.
     const current = () => this.entries.get(station.id)?.pending === pending;
-    const pending = this.limit(() => this.resolveFn(station), priority).then(
+    const queued = this.limit(() => this.resolveFn(station), priority);
+    const pending = queued.then(
       value => {
         const until = this.expiryFor(value);
         if (current()) this.entries.set(station.id, { value, until, usable: this.usableUntil(value, until) });
@@ -117,12 +136,28 @@ export class ResolutionCache {
         throw error;
       },
     );
-    this.entries.set(station.id, { ...entry, pending });
+    this.entries.set(station.id, { ...entry, pending, queued });
     if (stale) {
       pending.catch(() => {}); // reported through status(); callers got the previous stream
       return Promise.resolve(stale);
     }
     return pending;
+  }
+
+  // For the warm-up: get(), then wait for a background refresh it started and fail if that failed,
+  // so a station whose old stream still plays but can't be renewed counts as failing.
+  async settle(station, options) {
+    await this.get(station, options);
+    const entry = this.entries.get(station.id);
+    if (entry?.pending) await entry.pending;
+    const after = this.entries.get(station.id);
+    if (after?.error) throw after.error;
+  }
+
+  // Whether a failure is remembered (failureMs) and not retried yet.
+  failedRecently(id) {
+    const e = this.entries.get(id);
+    return !!e && !e.pending && !!e.error && e.until > this.now();
   }
 
   // A usable resolution without waiting, including the previous one while a refresh runs, so
@@ -171,8 +206,8 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       username: entry.username,
       password: entry.password,
       session: entry.session,
-      // A session signed in within the last 6 hours: a page without a stream is more likely off the
-      // air than signed out, so it isn't a reason to sign in again.
+      // A session signed in within the last 6 hours: when a page without a stream doesn't ask to
+      // sign in, the station is more likely off the air than the session expired.
       sessionFresh: () => !!entry.signedInAt && now() - Date.parse(entry.signedInAt) < 6 * 3_600_000,
       retrying: () => !!entry.retry && entry.retry > now(),
       // Why not to sign in now, or null: a failed sign-in waits until it's saved again or tested,
@@ -210,7 +245,10 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
 
   // Games on enabled stations around now. Schedule problems never break the playlist or guide.
   async function sportsState(hours = 168) {
-    if (!sportsOn()) return { onAir: [], games: [] };
+    if (!sportsOn()) {
+      sportsIds = new Set();
+      return { onAir: [], games: [] };
+    }
     try {
       const t = now();
       const [onAir, games] = await Promise.all([
@@ -221,6 +259,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       return { onAir, games };
     } catch (e) {
       log.warn?.(`sports schedule unavailable: ${e.message}`);
+      sportsIds = new Set();
       return { onAir: [], games: [] };
     }
   }
@@ -247,6 +286,33 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
     const stations = [...new Set(onAir.map(g => g.station))];
     await Promise.all(stations.map(station => cache.get(station, { priority: 0 }).catch(() => {})));
     return stations.map(s => s.id);
+  }
+
+  // Keeps "keep ready" stations resolved, so tuning in is instant: each due stream is refreshed in
+  // the background at the lowest priority (tuning in and local games go first). A station with
+  // nothing to play (one that streams only during newscasts) is tried again after 5 minutes,
+  // doubling up to an hour, rather than every minute. Called every minute by the server.
+  const warmBackoff = new Map(); // id -> { failures, until }
+  async function warmStations() {
+    const t = now();
+    const stations = store.enabled().filter(s => s.keepReady && !sportsIds.has(s.id));
+    for (const id of warmBackoff.keys()) if (!stations.some(s => s.id === id)) warmBackoff.delete(id);
+    const warmed = [];
+    await Promise.all(stations.map(async station => {
+      const backoff = warmBackoff.get(station.id);
+      // Not before the backoff, nor while someone else's failure is still remembered (that isn't a
+      // new attempt, so it doesn't count toward the backoff either).
+      if ((backoff && backoff.until > t) || cache.failedRecently(station.id)) return;
+      try {
+        await cache.settle(station, { priority: 2 });
+        warmBackoff.delete(station.id);
+        warmed.push(station.id);
+      } catch {
+        const failures = (backoff?.failures ?? 0) + 1;
+        warmBackoff.set(station.id, { failures, until: now() + Math.min(5 * 60_000 * 2 ** (failures - 1), 3_600_000) });
+      }
+    }));
+    return warmed.sort();
   }
 
   const baseUrl = req => (config.publicUrl || `http://${req.headers.host || `127.0.0.1:${config.port ?? 8899}`}`).replace(/\/$/, '');
@@ -442,10 +508,15 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
     if (p.startsWith('/api/') && !authorized(req)) throw new HttpError(401, 'missing or wrong X-Api-Key');
 
     if (method === 'PUT' && p === '/api/stations') {
-      const before = new Map(store.stations.map(s => [s.id, JSON.stringify(s)]));
+      // Whether a station changed in a way that matters for its stream ("keep ready" doesn't, so
+      // toggling it doesn't drop every playing stream).
+      const fingerprint = ({ keepReady, ...rest }) => JSON.stringify(rest);
+      const before = new Map(store.stations.map(s => [s.id, fingerprint(s)]));
       let saved;
       try { saved = await store.save(await readJson(req)); } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, e.message); }
-      for (const s of saved) if (before.get(s.id) !== JSON.stringify(s)) { cache.invalidate(s.id); masters.delete(s.id); }
+      for (const s of saved) {
+        if (before.get(s.id) !== fingerprint(s)) { cache.invalidate(s.id); masters.delete(s.id); warmBackoff.delete(s.id); }
+      }
       for (const id of before.keys()) if (!store.get(id)) { cache.invalidate(id); masters.delete(id); }
       // A deleted station's sign-in goes with it. An empty list (a fresh or broken plugin config)
       // never clears them all.
@@ -521,6 +592,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
         logins?.allowRetry(station.id, now() + 3 * 60_000);
         // A failed test (an ad slate, a bot check) leaves a stream that's playing alone.
         const r = await cache.get(station, { force: true, keepOnFailure: true });
+        warmBackoff.delete(station.id); // it works now: warm it on the usual schedule again
         return send(res, 200, {
           ok: true, id: station.id, via: r.via, type: r.type, url: r.url, tookMs: r.tookMs,
           expiresAt: r.expiresAt ? new Date(r.expiresAt).toISOString() : null,
@@ -544,5 +616,5 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
     }
   }
 
-  return { handler, cache, warmSports };
+  return { handler, cache, warmSports, warmStations };
 }

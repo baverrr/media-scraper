@@ -364,3 +364,93 @@ test('slate playlist moves on with the clock', () => {
   assert.match(slatePlaylist(0, n => `${n}.ts`), /#EXT-X-MEDIA-SEQUENCE:0\n/);
   assert.doesNotMatch(a, /ENDLIST/);
 });
+
+test('keep ready: stations are resolved ahead of time, and one with nothing to play backs off', async () => {
+  const marketsDir = path.join(dataDir, 'markets');
+  const store = new StationStore({ dataDir: path.join(dataDir, 'warm-data'), marketsDir, market: 'test' });
+  await store.load();
+  await store.save([
+    { id: 'ready', url: 'https://station.example/live', keepReady: true },
+    { id: 'offair', url: 'https://station.example/off', keepReady: true },
+    { id: 'plain', url: 'https://station.example/plain' },
+  ]);
+  const calls = [];
+  const resolver = {
+    async resolve(station) {
+      calls.push(station.id);
+      if (station.id === 'offair') throw Object.assign(new Error('No live stream found on the page'), { details: {} });
+      return { url: `${cdnUrl}/master.m3u8?t=${token}`, type: 'hls', headers: {}, via: 'page' };
+    },
+  };
+  let t = 1_800_000_000_000;
+  const local = createApp({ store, resolver, config: { failureSeconds: 0 }, log: {}, now: () => t });
+  assert.deepEqual(await local.warmStations(), ['ready']);
+  assert.deepEqual(calls.sort(), ['offair', 'ready']); // "plain" isn't kept ready
+  assert.equal(local.cache.status('ready').state, 'ready');
+
+  t += 60_000;
+  await local.warmStations();
+  assert.deepEqual(calls.sort(), ['offair', 'ready']); // fresh, and the failed one waits 5 minutes
+  t += 5 * 60_000;
+  await local.warmStations();
+  assert.deepEqual(calls.filter(c => c === 'offair').length, 2);
+  t += 6 * 60_000;
+  await local.warmStations();
+  assert.deepEqual(calls.filter(c => c === 'offair').length, 2); // then 10 minutes
+  t += 5 * 60_000;
+  await local.warmStations();
+  assert.deepEqual(calls.filter(c => c === 'offair').length, 3);
+  assert.equal(calls.filter(c => c === 'ready').length, 1); // still fresh (30-minute TTL)
+});
+
+test('priority semaphore: a queued job can be moved up', async () => {
+  const run = semaphore(1);
+  const order = [];
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const first = run(async () => { await gate; order.push('running'); }, 2);
+  const warm = ['a', 'b', 'c'].map(id => run(async () => { order.push(id); }, 2));
+  run.raise(warm[2], 1);
+  run.raise(first, 0); // already running: nothing to move
+  release();
+  await Promise.all([first, ...warm]);
+  assert.deepEqual(order, ['running', 'c', 'a', 'b']);
+});
+
+test('keep ready: a failed renewal of a still-playing stream backs off; toggling keep ready drops nothing', async () => {
+  const marketsDir = path.join(dataDir, 'markets');
+  const store = new StationStore({ dataDir: path.join(dataDir, 'warm2-data'), marketsDir, market: 'test' });
+  await store.load();
+  await store.save([{ id: 'news', url: 'https://station.example/news', keepReady: true }]);
+  let fail = false;
+  let calls = 0;
+  const resolver = {
+    async resolve() {
+      calls++;
+      if (fail) throw Object.assign(new Error('No live stream found on the page'), { details: {} });
+      return { url: `${cdnUrl}/master.m3u8?t=${token}`, type: 'hls', headers: {}, via: 'page' };
+    },
+  };
+  let t = 1_800_000_000_000;
+  const local = createApp({ store, resolver, config: { apiKey: 'secret', ttlMinutes: 0.0001, failureSeconds: 0 }, log: {}, now: () => t });
+  await local.warmStations();
+  assert.equal(calls, 1);
+  fail = true;
+  await new Promise(r => setTimeout(r, 20)); // the TTL (6 ms) passes: due for renewal
+  assert.deepEqual(await local.warmStations(), []); // the renewal failed: not counted as warmed
+  t += 60_000;
+  await local.warmStations();
+  assert.equal(calls, 2); // backing off, though the old stream is still playable
+
+  const server = http.createServer(local.handler);
+  const url = await listen(server);
+  try {
+    fail = false;
+    local.cache.invalidate();
+    await local.cache.get(store.get('news'));
+    await fetch(`${url}/api/stations`, { method: 'PUT', headers: { 'x-api-key': 'secret' }, body: JSON.stringify([{ id: 'news', url: 'https://station.example/news', keepReady: false }]) });
+    assert.ok(local.cache.peek('news')); // still playing
+  } finally {
+    server.close();
+  }
+});

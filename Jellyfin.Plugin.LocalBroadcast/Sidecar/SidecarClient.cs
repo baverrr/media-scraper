@@ -84,6 +84,7 @@ public class SidecarClient
                 signUpUrl = string.IsNullOrWhiteSpace(s.SignUpUrl) ? null : s.SignUpUrl.Trim(),
                 logo = string.IsNullOrWhiteSpace(s.Logo) ? null : s.Logo,
                 sportsAliases = (s.SportsAliases ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
+                keepReady = config.KeepStreamsReady,
                 note,
                 enabled = s.Enabled && inRange,
             };

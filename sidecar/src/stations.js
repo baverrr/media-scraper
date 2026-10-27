@@ -44,6 +44,8 @@ export function normalizeStation(raw) {
     signUpUrl: signUpUrl ? httpUrl(signUpUrl, `station ${id}: signUpUrl`) : null,
     logo: logo || null,
     sportsAliases: aliases.map(text).filter(Boolean),
+    // Keep this station's stream resolved in the background, so tuning in is instant.
+    keepReady: raw.keepReady === true,
     // Why a station is disabled, shown in the plugin settings.
     note: text(raw.note) || null,
     enabled: raw.enabled !== false,
