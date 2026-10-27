@@ -6,13 +6,17 @@ import http from 'node:http';
 import { mkdtemp, rm, readFile, mkdir, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { LoginStore, parseKey, encrypt, decrypt } from '../src/logins.js';
 import { Resolver } from '../src/resolver.js';
 import { createApp } from '../src/app.js';
 import { StationStore } from '../src/stations.js';
 
-const SCRAPER = path.resolve(process.env.SCRAPER_PATH || '/app/media-scraper.js');
+// Next to the app in the image, two levels up in the repository (as in scraper.test.js).
+const here = path.dirname(fileURLToPath(import.meta.url));
+const SCRAPER = [path.join(here, '..', 'media-scraper.js'), path.join(here, '..', '..', 'media-scraper.js')].find(p => existsSync(p));
 let dir;
 before(async () => { dir = await mkdtemp(path.join(tmpdir(), 'lb-signin-')); });
 after(async () => { await rm(dir, { recursive: true, force: true }); });
