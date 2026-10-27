@@ -213,3 +213,16 @@ test('app: a station airing two games at once is still one channel', async () =>
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('denver market: network games go to the Denver station before neighboring markets', async () => {
+  const { loadMarket } = await import('../src/stations.js');
+  const m = await loadMarket(new URL('../markets', import.meta.url).pathname.replace(/%20/g, ' '), 'denver');
+  const enabled = m.stations.filter(s => s.enabled);
+  const game = net => ({ id: `nfl:${net}`, start: 0, end: 1, state: 'pre', broadcasts: [net] });
+  const on = net => matchEvents([game(net)], enabled)[0]?.station.id;
+  assert.equal(on('NBC'), 'kusa');
+  assert.equal(on('ABC'), 'kmgh');
+  assert.equal(on('CBS'), 'kcnc');
+  // Every station is still in the list, and channel ids are unique.
+  assert.equal(new Set(m.stations.map(s => s.id)).size, m.stations.length);
+});
