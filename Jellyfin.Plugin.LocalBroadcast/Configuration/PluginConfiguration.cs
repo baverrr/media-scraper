@@ -51,6 +51,17 @@ public class Station
     public string? StreamUrl { get; set; }
 
     /// <summary>
+    /// Gets or sets the page with the site's sign-in form, for a station that streams only to
+    /// signed-in accounts. The account itself is saved in the sidecar, encrypted, never here.
+    /// </summary>
+    public string? SignInUrl { get; set; }
+
+    /// <summary>
+    /// Gets or sets where to create an account on the station's site, linked from the settings page.
+    /// </summary>
+    public string? SignUpUrl { get; set; }
+
+    /// <summary>
     /// Gets or sets an optional logo image URL.
     /// </summary>
     public string? Logo { get; set; }
@@ -316,6 +327,10 @@ public class Market
 
         public string? StreamUrl { get; set; }
 
+        public string? SignInUrl { get; set; }
+
+        public string? SignUpUrl { get; set; }
+
         public string? Logo { get; set; }
 
         public string? City { get; set; }
@@ -340,6 +355,8 @@ public class Market
             Network = Network,
             Url = Url,
             StreamUrl = StreamUrl,
+            SignInUrl = SignInUrl,
+            SignUpUrl = SignUpUrl,
             Logo = Logo,
             City = City,
             Latitude = Latitude,

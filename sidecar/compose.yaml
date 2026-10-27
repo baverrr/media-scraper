@@ -27,6 +27,9 @@ services:
       MARKET: ${MARKET:-denver} # default stations and teams until the plugin sends its own
       TZ: ${TZ:-}
       MAX_HEIGHT: "1080"
+      # Encrypts saved station sign-ins (openssl rand -base64 32). Unset, a key is generated in
+      # the data volume, next to what it encrypts.
+      LOGIN_KEY: ${LOCAL_BROADCAST_LOGIN_KEY:-}
     volumes:
       - local-broadcast-data:/data
 

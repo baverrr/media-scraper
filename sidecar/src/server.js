@@ -7,6 +7,7 @@ import { StationStore } from './stations.js';
 import { Resolver } from './resolver.js';
 import { createApp } from './app.js';
 import { SportsSchedule } from './sports.js';
+import { LoginStore, parseKey } from './logins.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -45,11 +46,12 @@ if (!scraperPath) {
 const store = new StationStore({ dataDir: config.dataDir, marketsDir: path.join(here, '..', 'markets'), market: config.market });
 await store.load();
 const sports = new SportsSchedule({ teams: store.sports.teams, log });
+const logins = await new LoginStore({ dataDir: config.dataDir, key: parseKey(env.LOGIN_KEY), log }).load();
 
 // The browser's time zone: TZ, else the market's (markets/<id>.json "timezone").
 const timezoneId = env.TZ || (await store.marketDefaults().catch(() => null))?.timezone || undefined;
 const resolver = new Resolver({ scraperPath, ytDlp: config.ytDlp, maxHeight: config.maxHeight, channel: config.browserChannel, timezoneId, log });
-const app = createApp({ store, resolver, sports, config, log });
+const app = createApp({ store, resolver, sports, logins, config, log });
 const resolve = app.cache.resolveFn;
 app.cache.resolveFn = async station => {
   log.info(`[${station.id}] resolving ${station.url}`);

@@ -31,6 +31,105 @@ export function isBotCheck(status, text) {
   return BOT_CHECK_TEXT.test(text || '') && (status === 403 || status === 429 || status === 503 || text.length < 1500);
 }
 
+const USER_FIELDS = [
+  'input[type="email"]',
+  'input[autocomplete~="username"]',
+  'input[autocomplete~="email"]',
+  'input[name*="email" i]',
+  'input[id*="email" i]',
+  'input[name*="user" i]',
+  'input[name*="login" i]',
+  'input[type="text"]',
+];
+
+async function visible(frame, selector) {
+  const loc = frame.locator(selector).filter({ visible: true }).first();
+  return (await loc.count().catch(() => 0)) ? loc : null;
+}
+
+// The visible email/username and password fields: from the frame with a password field, else
+// (the email step of a two-step form) from one with a field that is clearly an email or username,
+// so a site's search box never gets the email.
+export async function signInForm(page) {
+  for (const frame of page.frames()) {
+    const password = await visible(frame, 'input[type="password"]');
+    if (!password) continue;
+    let user = null;
+    for (const sel of USER_FIELDS) if ((user = await visible(frame, sel))) break;
+    return { frame, user, password };
+  }
+  for (const frame of page.frames()) {
+    for (const sel of USER_FIELDS.filter(f => f !== 'input[type="text"]')) {
+      const user = await visible(frame, sel);
+      if (user) return { frame, user, password: null };
+    }
+  }
+  return { user: null, password: null };
+}
+
+// After the password: a field for a code the site sent (emailed code, text message, authenticator).
+async function asksForCode(page) {
+  for (const frame of page.frames()) {
+    if (await visible(frame, 'input[autocomplete="one-time-code"], input[name*="code" i], input[id*="code" i], input[name*="otp" i], input[name*="token" i]')) return true;
+  }
+  return false;
+}
+
+const SIGN_IN_NAMES = /^\s*(log ?in|sign ?in)\s*$/i;
+const SIGN_UP_NAMES = /^\s*(sign ?up|register|join( now| free| for free)?|create (an |your |a free )?account|get started)\s*$/i;
+// A box accepting the site's terms (or privacy policy), which the person accepted in the settings;
+// boxes agreeing to anything else (offers, partners, an age) are left to the person.
+const TERMS_LABEL = /\bterms\b|conditions|privacy policy|terms of (use|service)/i;
+const NOT_TERMS_LABEL = /offer|partner|marketing|newsletter|promot|updates|news\b|\b1[38]\b|years? old|age\b/i;
+const CONFIRM_EMAIL = /(verify|confirm|activate)\b[^.]{0,60}\b(e-?mail|account|address)|check your (e-?mail|inbox)/i;
+
+async function clickSignInLink(page) {
+  return clickControl(page, SIGN_IN_NAMES);
+}
+
+// The text a person reads for a field: its <label>, aria-label, placeholder or name.
+async function fieldLabel(field) {
+  return field.evaluate(el => {
+    const byFor = el.id && el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    return (byFor?.innerText || el.closest('label')?.innerText || el.getAttribute('aria-label') || el.placeholder || el.name || '').replace(/\s+/g, ' ').trim();
+  }).catch(() => '');
+}
+
+// Visible fields the form requires beyond the email and password: names, birthdays, phone
+// numbers, choices. Those are the person's to fill in on the site.
+async function otherRequiredFields(frame) {
+  return frame.evaluate(() => [...document.querySelectorAll('input, select, textarea')]
+    .filter(el => el.offsetParent && (el.required || el.getAttribute('aria-required') === 'true'))
+    .filter(el => !['email', 'password', 'checkbox', 'hidden', 'submit', 'button'].includes(el.type))
+    .filter(el => !/e-?mail|user/i.test(`${el.name} ${el.id} ${el.autocomplete}`))
+    .filter(el => !el.value)
+    .map(el => (el.labels?.[0]?.innerText || el.getAttribute('aria-label') || el.placeholder || el.name || el.type).replace(/\s+/g, ' ').trim()))
+    .catch(() => []);
+}
+
+async function clickControl(page, names) {
+  for (const frame of page.frames()) {
+    for (const role of ['button', 'link']) {
+      const loc = frame.getByRole(role, { name: names }).filter({ visible: true }).first();
+      if (await loc.count().catch(() => 0)) {
+        await loc.click({ timeout: 3000 }).catch(() => {});
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// A CAPTCHA the person would have to solve: a visible reCAPTCHA checkbox or challenge, hCaptcha
+// or Cloudflare Turnstile. Invisible reCAPTCHA that never challenges is fine.
+async function showsCaptcha(page) {
+  const sel = 'iframe[src*="recaptcha"][src*="bframe"], iframe[src*="recaptcha"][src*="anchor"]:not([src*="size=invisible"]), iframe[src*="hcaptcha.com"], iframe[src*="challenges.cloudflare.com"], iframe[src*="arkoselabs"], iframe[src*="funcaptcha"], iframe[title*="captcha" i], .g-recaptcha, .h-captcha, .cf-turnstile';
+  for (const frame of page.frames()) {
+    if ((await frame.locator(sel).filter({ visible: true }).count().catch(() => 0)) > 0) return true;
+  }
+  return false;
+}
+
 export class ResolveError extends Error {
   constructor(message, details = {}) {
     super(message);
@@ -96,8 +195,25 @@ export class Resolver {
     }
   }
 
-  async resolve(station) {
+  // login: the station's saved sign-in, for a station that streams only to signed-in accounts
+  // ({ username, password, session } plus callbacks that store the outcome; see app.js). A saved
+  // session is tried first; when the page then has no stream, the session may have expired, so
+  // the resolver signs in again once.
+  async resolve(station, login = null) {
     if (station.streamUrl) return this.resolveManual(station);
+    try {
+      return await this.resolvePage(station, login);
+    } catch (e) {
+      // Only a page with no stream at all suggests the session expired; a bot check, DRM or a
+      // failed sign-in wouldn't get better by signing in again.
+      if (!login?.session || !(e instanceof ResolveError) || e.details?.reason !== 'no-stream') throw e;
+      this.log.info?.(`[${station.id}] no stream with the saved session; signing in again`);
+      await login.forgetSession();
+      return this.resolvePage(station, { ...login, session: null });
+    }
+  }
+
+  async resolvePage(station, login) {
     if (!this.scraperSource) this.scraperSource = await readFile(this.scraperPath, 'utf8');
     const started = Date.now();
     const browser = await this.browser();
@@ -107,10 +223,17 @@ export class Resolver {
       locale: 'en-US',
       ...(this.timezoneId ? { timezoneId: this.timezoneId } : {}),
       viewport: { width: 1280, height: 720 },
+      ...(login?.session ? { storageState: login.session } : {}),
     });
     const found = [];
     const embeds = [];
+    // Keeps the session's renewed cookies once a stream was found with it.
+    const finish = async result => {
+      if (login) await context.storageState().then(state => login.saveSession(state)).catch(() => {});
+      return result;
+    };
     try {
+      if (login && !login.session) await this.signIn(context, station, login);
       await context.addInitScript({ content: 'Object.defineProperty(navigator, "webdriver", { get: () => undefined });' });
       // Runs in every frame, cross-origin player iframes included, before the page's scripts.
       await context.addInitScript({ content: this.scraperSource });
@@ -180,7 +303,7 @@ export class Resolver {
       const best = pickBest(candidates);
       if (best) {
         const url = best.probe.finalUrl || best.url;
-        return {
+        return finish({
           url,
           type: best.type || (best.probe.dash ? 'dash' : 'hls'),
           headers: best.headers,
@@ -188,13 +311,13 @@ export class Resolver {
           expiresAt: expiryFromUrl(url, Date.now()),
           resolvedAt: Date.now(),
           tookMs: Date.now() - started,
-        };
+        });
       }
 
       for (const e of embeds) {
         if (!this.ytDlp || !EMBED_PROVIDERS.test(e.provider || '')) continue;
         const viaYtDlp = await this.fromYtDlp(e.url).catch(() => null);
-        if (viaYtDlp) return { ...viaYtDlp, via: `yt-dlp (${e.provider})`, resolvedAt: Date.now(), tookMs: Date.now() - started };
+        if (viaYtDlp) return finish({ ...viaYtDlp, via: `yt-dlp (${e.provider})`, resolvedAt: Date.now(), tookMs: Date.now() - started });
       }
 
       const drmOnly = candidates.length > 0 && candidates.some(c => c.probe?.drm) && !candidates.some(c => c.probe?.ok);
@@ -203,6 +326,7 @@ export class Resolver {
         : botCheck ? 'The station\'s site shows a bot check instead of the page; the sidecar doesn\'t get around bot checks'
           : 'No live stream found on the page';
       throw new ResolveError(message, {
+        reason: drmOnly ? 'drm' : botCheck ? 'bot-check' : 'no-stream',
         candidates: candidates.map(c => ({ url: c.url, sources: c.sources, paired: !!c.paired, probe: c.probe })),
         embeds,
         tookMs: Date.now() - started,
@@ -230,6 +354,112 @@ export class Resolver {
       if (viaYtDlp) return { ...viaYtDlp, via: 'manual URL (yt-dlp)', resolvedAt: Date.now(), tookMs: Date.now() - started };
     }
     throw new ResolveError(`Manual stream URL is not a live stream: ${probe.ok ? 'not live' : probe.error}`, { probe, tookMs: Date.now() - started });
+  }
+
+  // Signs in with the station's saved email and password through the site's own sign-in form,
+  // the way a person would: the form on signInUrl (else the station page), opened with its "Log
+  // in" / "Sign in" link when it isn't showing, email (then "next" on two-step forms), password,
+  // Enter. A CAPTCHA ends it: the sidecar doesn't solve them.
+  async signIn(context, station, login) {
+    const url = station.signInUrl || station.url;
+    const waiting = login.mayAttempt?.();
+    if (waiting) throw new ResolveError(`Sign-in: ${waiting}`, { signIn: true, url });
+    const fail = async message => {
+      await login.failed(message).catch(() => {});
+      throw new ResolveError(`Sign-in: ${message}`, { signIn: true, url });
+    };
+    const page = await context.newPage();
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: this.pageTimeoutMs });
+      await page.waitForTimeout(2500);
+      let form = await signInForm(page);
+      if (!form.user && !form.password && await clickSignInLink(page)) {
+        await page.waitForTimeout(3000);
+        form = await signInForm(page);
+      }
+      if (await showsCaptcha(page)) return await fail('the site asks for a CAPTCHA, which the sidecar doesn\'t solve');
+      if (!form.user && !form.password) return await fail(`no sign-in form found at ${url}`);
+      if (form.user) await form.user.fill(login.username);
+      if (!form.password) {
+        await form.user.press('Enter');
+        await page.waitForTimeout(3000);
+        form = await signInForm(page);
+        if (!form.password) return await fail(await showsCaptcha(page) ? 'the site asks for a CAPTCHA, which the sidecar doesn\'t solve' : 'the sign-in form has no password field after the email');
+      }
+      await form.password.fill(login.password);
+      await form.password.press('Enter');
+      for (let waited = 0; waited < 20_000; waited += 1000) {
+        await page.waitForTimeout(1000);
+        if (await showsCaptcha(page)) return await fail('the site asks for a CAPTCHA, which the sidecar doesn\'t solve');
+        if (!(await signInForm(page)).password) {
+          await page.waitForTimeout(1500); // let the site store its session, or show its next step
+          if (await asksForCode(page)) return await fail('the site asks for a code it sent you (an emailed code or two-step sign-in), which the sidecar can\'t enter');
+          await login.signedIn(await context.storageState());
+          this.log.info?.(`[${station.id}] signed in`);
+          return;
+        }
+      }
+      return await fail('the site didn\'t accept the email and password (the sign-in form is still showing)');
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  // Creates an account on the station's site with the email and password the person chose, through
+  // the site's own sign-up form, when it asks for nothing else: email, password (and a repeat of
+  // it) and, if acceptTerms, its terms box. It stops at a CAPTCHA or any other required field; an
+  // email to confirm is left to the person. Returns { confirmEmail, session }.
+  async signUp(station, { username, password, acceptTerms = false }) {
+    const url = station.signUpUrl;
+    const fail = message => { throw new ResolveError(`Sign-up: ${message}`, { signUp: true, url }); };
+    if (!url) fail('the station has no sign-up page URL');
+    const browser = await this.browser();
+    const context = await browser.newContext({ userAgent: await this.userAgent(browser), locale: 'en-US', viewport: { width: 1280, height: 720 } });
+    try {
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: this.pageTimeoutMs });
+      await page.waitForTimeout(2500);
+      if (!(await signInForm(page)).password && await clickControl(page, SIGN_UP_NAMES)) await page.waitForTimeout(3000);
+      if (await showsCaptcha(page)) fail('the sign-up form has a CAPTCHA, which the sidecar doesn\'t solve; create the account on the site yourself');
+      const form = await signInForm(page);
+      if (!form.password || !form.user) fail(`no sign-up form with an email and password at ${url}`);
+      const frame = form.frame;
+
+      const extra = await otherRequiredFields(frame);
+      if (extra.length) fail(`the form asks for more than an email and password (${extra.join(', ')}); create the account on the site yourself`);
+      const boxes = await frame.locator('input[type="checkbox"]').filter({ visible: true }).all();
+      for (const box of boxes) {
+        if (await box.isChecked()) continue;
+        const label = await fieldLabel(box);
+        const required = await box.evaluate(el => el.required || el.getAttribute('aria-required') === 'true');
+        if (TERMS_LABEL.test(label) && !NOT_TERMS_LABEL.test(label)) {
+          if (!acceptTerms) fail('the site asks you to accept its terms; tick "I accept the site\'s terms" first');
+          await box.check({ force: true });
+        } else if (required) {
+          fail(`the form asks you to tick "${label.slice(0, 80)}"; create the account on the site yourself`);
+        } // optional boxes (newsletters) stay unticked
+      }
+
+      await form.user.fill(username);
+      const passwords = await frame.locator('input[type="password"]').filter({ visible: true }).all();
+      for (const p of passwords) await p.fill(password);
+      await passwords[passwords.length - 1].press('Enter');
+
+      for (let waited = 0; waited < 20_000; waited += 1000) {
+        await page.waitForTimeout(1000);
+        if (await showsCaptcha(page)) fail('the site asked for a CAPTCHA after the form was sent; create the account on the site yourself');
+        if (!(await signInForm(page)).password) {
+          await page.waitForTimeout(1500);
+          const text = await page.evaluate(() => document.body?.innerText.slice(0, 3000) ?? '').catch(() => '');
+          this.log.info?.(`[${station.id}] account created`);
+          return { confirmEmail: CONFIRM_EMAIL.test(text), session: await context.storageState() };
+        }
+      }
+      const problem = await page.locator('[role="alert"], [class*="error" i]').filter({ visible: true }).first().innerText({ timeout: 1000 }).catch(() => '');
+      return fail(problem ? `the site said: ${problem.replace(/\s+/g, ' ').trim().slice(0, 160)}` : 'the site didn\'t accept the sign-up (the form is still showing)');
+    } finally {
+      await context.close().catch(() => {});
+    }
   }
 
   // Only names the failure: a page answered with a challenge ("press and hold", a CAPTCHA) rather

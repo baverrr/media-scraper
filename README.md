@@ -91,6 +91,7 @@ Enabled stations farther away than the limit stay out of Live TV and Local Sport
 
    ```bash
    echo "LOCAL_BROADCAST_API_KEY=$(openssl rand -hex 24)" > sidecar/.env
+   echo "LOCAL_BROADCAST_LOGIN_KEY=$(openssl rand -base64 32)" >> sidecar/.env
    chmod 600 sidecar/.env
    docker compose -f sidecar/compose.yaml up -d
    ```
@@ -124,6 +125,7 @@ Whether a station works depends on how its website streams:
 | embeds YouTube or another site yt-dlp supports | ✅ Works through yt-dlp. |
 | streams only during newscasts | ⚠️ Plays during newscasts; at other times the channel shows a "Nothing is streaming right now" screen. |
 | uses DRM (Widevine, FairPlay) | ❌ Jellyfin can't play DRM streams. |
+| streams only to signed-in (free) accounts | ⚠️ Works with a sign-in saved for the station, when the site's sign-in form is a plain one. See [Station sign-ins](#station-sign-ins). |
 | streams only in an app | ❌ No web stream to find. |
 | shows a bot check | ❌ The sidecar doesn't get around bot checks. |
 | plays another station's stream | Left off, so the same channel doesn't appear twice. |
@@ -146,12 +148,25 @@ Missing your area? [CONTRIBUTING.md](CONTRIBUTING.md) shows the format and how t
 | `MARKET` | set in `compose.yaml` | Stations and teams used until the plugin sends its own. |
 | `TZ` | the market's | Time zone the station pages see (e.g. `America/Chicago`). |
 | `MAX_HEIGHT` | `1080` | Highest quality picked from a station's variants. |
+| `LOGIN_KEY` | generated | Encrypts saved station sign-ins (32 bytes: `openssl rand -base64 32`). The compose file reads it from `LOCAL_BROADCAST_LOGIN_KEY`. Unset, a key is generated in the data volume as `login.key`. |
 | `RESOLVE_TTL_MINUTES` | `30` | How long a found stream is reused (shorter when its token expires sooner). |
 | `MAX_CONCURRENT_RESOLVES` | `2` | Browser pages at once; local-sports stations jump the queue. |
 | `BROWSER_CHANNEL` | `chrome` | `chrome` has H.264/AAC, which many players need; empty uses the bundled Chromium. |
 | `PUBLIC_URL` | from the request | Base URL written into the M3U. |
 
 HTTP API: `GET /playlist.m3u`, `GET /guide.xml`, `GET /stream/<id>.m3u8` (`local-sports` included), `GET /api/status`, `GET /api/sports`, `GET /api/stations`. With the API key: `PUT /api/stations`, `PUT /api/sports`, `POST /api/stations/<id>/test`. Proxied segment URLs are HMAC-signed, so the proxy can't be used to fetch arbitrary URLs.
+
+## Station sign-ins
+
+Some stations stream only to visitors signed in to a free account on their site. Edit the station in the plugin settings to give it a sign-in:
+
+- **You already have an account:** enter its email and password and choose **Save sign-in**.
+- **You don't:** enter the email and password you want, read the site's terms, tick the box, and choose **Create the account for me**. The sidecar fills in the site's own sign-up form. If the site sends a confirmation email, open it yourself.
+- **Save the email and password in your password manager.** The sidecar never shows the password again.
+
+The sidecar signs in through the site's own form when the station is played or tested, and keeps the session so it doesn't sign in every time. It stops and says so when a site shows a CAPTCHA, asks for anything beyond an email and password, or signs in with an emailed code. Those accounts are yours to create and use on the site itself.
+
+Sign-ins are encrypted (AES-256-GCM) in the sidecar's data volume. Jellyfin never stores them, and the sidecar's API reports only a station's email and whether the last sign-in worked. Set `LOGIN_KEY` to keep the key out of the data volume.
 
 ## Development
 

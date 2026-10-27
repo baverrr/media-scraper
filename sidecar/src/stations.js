@@ -23,6 +23,8 @@ export function normalizeStation(raw) {
   if (id === 'local-sports') throw new Error('station id "local-sports" is reserved');
   const url = httpUrl(text(raw.url), `station ${id}: url`);
   const streamUrl = text(raw.streamUrl);
+  const signInUrl = text(raw.signInUrl);
+  const signUpUrl = text(raw.signUpUrl);
   const logo = text(raw.logo);
   const aliases = Array.isArray(raw.sportsAliases) ? raw.sportsAliases : text(raw.sportsAliases).split(',');
   return {
@@ -35,6 +37,11 @@ export function normalizeStation(raw) {
     // Optional: a stream to use instead of scraping the page (a manifest URL, or any page
     // yt-dlp supports). The page URL still serves as the Referer.
     streamUrl: streamUrl ? httpUrl(streamUrl, `station ${id}: streamUrl`) : null,
+    // Optional: where the site's sign-in form is, for a station that streams only to signed-in
+    // accounts (the account itself is saved separately, encrypted; see logins.js).
+    signInUrl: signInUrl ? httpUrl(signInUrl, `station ${id}: signInUrl`) : null,
+    // Optional: where to create an account, for "Create the account for me".
+    signUpUrl: signUpUrl ? httpUrl(signUpUrl, `station ${id}: signUpUrl`) : null,
     logo: logo || null,
     sportsAliases: aliases.map(text).filter(Boolean),
     // Why a station is disabled, shown in the plugin settings.

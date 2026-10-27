@@ -14,6 +14,7 @@ Everything is stored on the machine where you run it:
 | Your location for the coverage area, if you enter one | The same plugin settings file | Optional. Used only to work out distances inside Jellyfin. It is never sent to the sidecar or anywhere else. |
 | A fingerprint of the last station list sent to the sidecar | `plugins/Jellyfin.Plugin.LocalBroadcast/last-pushed-stations.txt` | A SHA-256 hash, so the guide can refresh after a restart. |
 | Station list and sports settings as the sidecar received them | The sidecar's data volume (`stations.json`, `sports.json`) | |
+| Station sign-ins you save: email, password, and the site's session cookies | The sidecar's data volume (`logins.json`) | Encrypted with AES-256-GCM, with the key from `LOGIN_KEY` or `login.key`. Never stored by Jellyfin, never shown again, and sent only to the station's own site when signing in. Removed with **Remove sign-in** or when the station is deleted. |
 | Resolved stream URLs | Sidecar memory only | Gone when the container restarts. |
 | Logs | The sidecar's container log and Jellyfin's log | Station ids, station page URLs, errors and timings. Nothing about who is watching. |
 
