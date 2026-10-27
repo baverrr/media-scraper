@@ -89,7 +89,7 @@ public class SyncService : IHostedService, IDisposable
             // so a sync queued with older settings could otherwise run last and push them.
             var config = Plugin.Instance?.Configuration ?? throw new InvalidOperationException("Plugin not loaded");
             var result = new SyncResult { Time = DateTime.UtcNow };
-            var stationsJson = JsonSerializer.Serialize(SidecarClient.ToSidecarStations(config.Stations), SidecarClient.JsonOptions)
+            var stationsJson = JsonSerializer.Serialize(SidecarClient.ToSidecarStations(config), SidecarClient.JsonOptions)
                 + JsonSerializer.Serialize(SidecarClient.ToSidecarSports(config), SidecarClient.JsonOptions);
             try
             {

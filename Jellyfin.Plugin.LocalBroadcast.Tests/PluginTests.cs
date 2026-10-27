@@ -26,7 +26,12 @@ public class MarketTests
             Assert.StartsWith("https://", s.Url);
             // Every disabled station says why.
             Assert.True(s.Enabled || !string.IsNullOrWhiteSpace(s.Note), s.Id);
+            // Every bundled station has a location for the coverage area.
+            Assert.False(string.IsNullOrWhiteSpace(s.City), s.Id);
+            Assert.InRange(s.Latitude!.Value, -90, 90);
+            Assert.InRange(s.Longitude!.Value, -180, 180);
         });
+        Assert.Equal("Denver, CO", market.Center!.City);
         Assert.Contains(market.Stations, s => s.CallSign == "KUSA" && s.Channel == "9.1" && s.Enabled);
         Assert.Contains(market.Teams, t => t.League == "nfl" && t.Team == "den");
         Assert.Null(Market.Load("nowhere"));
@@ -46,6 +51,72 @@ public class MarketTests
     }
 }
 
+public class CoverageTests
+{
+    private static PluginConfiguration Config(int miles) => new()
+    {
+        MaxDistanceMiles = miles,
+        Stations =
+        {
+            new Station { Id = "kusa", Url = "https://x", Latitude = 39.7392, Longitude = -104.9903 },
+            new Station { Id = "koaa", Url = "https://x", Latitude = 38.2544, Longitude = -104.6091 },
+            new Station { Id = "kob", Url = "https://x", Latitude = 35.0844, Longitude = -106.6504 },
+            new Station { Id = "custom", Url = "https://x" },
+            new Station { Id = "off", Url = "https://x", Enabled = false, Note = "why", Latitude = 35.0844, Longitude = -106.6504 },
+        },
+    };
+
+    private static JsonElement[] Sent(PluginConfiguration config)
+        => JsonDocument.Parse(JsonSerializer.Serialize(SidecarClient.ToSidecarStations(config), SidecarClient.JsonOptions)).RootElement.EnumerateArray().ToArray();
+
+    [Fact]
+    public void MeasuresMiles()
+    {
+        // Denver to Albuquerque is about 333 miles; Denver to Pueblo about 104.
+        Assert.InRange(Coverage.Miles(39.7392, -104.9903, 35.0844, -106.6504), 328, 338);
+        Assert.InRange(Coverage.Miles(39.7392, -104.9903, 38.2544, -104.6091), 100, 108);
+        Assert.Equal(0, Coverage.Miles(1, 2, 1, 2), 6);
+    }
+
+    [Fact]
+    public void LeavesOutStationsBeyondTheRadiusFromTheMarketCenter()
+    {
+        var sent = Sent(Config(150));
+        Assert.True(sent[0].GetProperty("enabled").GetBoolean());
+        Assert.True(sent[1].GetProperty("enabled").GetBoolean());
+        Assert.False(sent[2].GetProperty("enabled").GetBoolean());
+        Assert.StartsWith("Outside the 150-mile coverage radius (33", sent[2].GetProperty("note").GetString(), StringComparison.Ordinal);
+        // No location: always included. Disabled: stays disabled with its own note.
+        Assert.True(sent[3].GetProperty("enabled").GetBoolean());
+        Assert.Equal("why", sent[4].GetProperty("note").GetString());
+    }
+
+    [Fact]
+    public void MeasuresFromTheHomeLocationAndZeroMeansNoLimit()
+    {
+        var config = Config(50);
+        config.HomeLatitude = 38.2544;
+        config.HomeLongitude = -104.6091;
+        var sent = Sent(config);
+        Assert.False(sent[0].GetProperty("enabled").GetBoolean());
+        Assert.True(sent[1].GetProperty("enabled").GetBoolean());
+
+        Assert.All(Sent(Config(0)).Take(4), s => Assert.True(s.GetProperty("enabled").GetBoolean()));
+    }
+
+    [Fact]
+    public void FillsInLocationsForStationsSeededBeforeTheyExisted()
+    {
+        var config = new PluginConfiguration { Stations = { new Station { Id = "koaa" }, new Station { Id = "mine" }, new Station { Id = "kusa", Latitude = 1, Longitude = 2 } } };
+        Assert.True(Plugin.AddStationLocations(config, Market.Load("denver")));
+        Assert.Equal("Pueblo, CO", config.Stations[0].City);
+        Assert.NotNull(config.Stations[0].Latitude);
+        Assert.Null(config.Stations[1].Latitude);
+        Assert.Equal(1, config.Stations[2].Latitude);
+        Assert.False(Plugin.AddStationLocations(config, Market.Load("denver")));
+    }
+}
+
 public class SidecarClientTests
 {
     [Fact]
@@ -59,7 +130,7 @@ public class SidecarClientTests
     public void SendsStationsInTheSidecarsShape()
     {
         var json = JsonSerializer.Serialize(
-            SidecarClient.ToSidecarStations([new Station { Id = " KUSA ", CallSign = "KUSA", Name = "9NEWS", Url = "https://x", Logo = " " }]),
+            SidecarClient.ToSidecarStations(new PluginConfiguration { Stations = { new Station { Id = " KUSA ", CallSign = "KUSA", Name = "9NEWS", Url = "https://x", Logo = " " } } }),
             SidecarClient.JsonOptions);
         Assert.Equal("""[{"id":"kusa","callSign":"KUSA","name":"9NEWS","channel":"","network":"","url":"https://x","streamUrl":null,"logo":null,"sportsAliases":[],"note":null,"enabled":true}]""", json);
     }
@@ -68,7 +139,7 @@ public class SidecarClientTests
     public void SendsSportsAliasesAsAListAndTeamsNormalized()
     {
         var stations = JsonSerializer.Serialize(
-            SidecarClient.ToSidecarStations([new Station { Id = "ktvd", Url = "https://x", SportsAliases = " Altitude Sports, ,Altitude " }]),
+            SidecarClient.ToSidecarStations(new PluginConfiguration { Stations = { new Station { Id = "ktvd", Url = "https://x", SportsAliases = " Altitude Sports, ,Altitude " } } }),
             SidecarClient.JsonOptions);
         Assert.Contains("\"sportsAliases\":[\"Altitude Sports\",\"Altitude\"]", stations, StringComparison.Ordinal);
 

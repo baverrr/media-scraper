@@ -2,6 +2,11 @@
   "name": "Denver, CO",
   "timezone": "America/Denver",
   "sportsChannel": "1.1",
+  "center": {
+    "city": "Denver, CO",
+    "latitude": 39.7392,
+    "longitude": -104.9903
+  },
   "teams": [
     {
       "league": "nfl",
@@ -66,9 +71,11 @@
       "name": "CW2",
       "channel": "2.1",
       "network": "The CW",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://kdvr.com/live/kwgn/",
-      "enabled": false,
-      "note": "Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+      "enabled": true
     },
     {
       "id": "kcdo",
@@ -76,6 +83,9 @@
       "name": "The Spot Denver 3",
       "channel": "3.1",
       "network": "Independent",
+      "city": "Sterling, CO",
+      "latitude": 40.6255,
+      "longitude": -103.2077,
       "url": "https://www.thespottv.com/denver-3",
       "enabled": false,
       "note": "No live stream on the station website."
@@ -86,6 +96,9 @@
       "name": "CBS Colorado",
       "channel": "4.1",
       "network": "CBS",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://www.cbsnews.com/colorado/live/",
       "enabled": true
     },
@@ -95,6 +108,9 @@
       "name": "Rocky Mountain PBS",
       "channel": "6.1",
       "network": "PBS",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://www.rmpbs.org/livestream",
       "enabled": false,
       "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt."
@@ -105,6 +121,9 @@
       "name": "Denver7",
       "channel": "7.1",
       "network": "ABC",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://www.denver7.com/live",
       "enabled": true
     },
@@ -114,6 +133,9 @@
       "name": "9NEWS",
       "channel": "9.1",
       "network": "NBC",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://www.9news.com/watch",
       "enabled": true
     },
@@ -123,6 +145,9 @@
       "name": "PBS12",
       "channel": "12.1",
       "network": "PBS",
+      "city": "Broomfield, CO",
+      "latitude": 39.9205,
+      "longitude": -105.0867,
       "url": "https://www.pbs12.org/livestream",
       "enabled": false,
       "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt."
@@ -133,6 +158,9 @@
       "name": "Univision Colorado",
       "channel": "14.1",
       "network": "Univision",
+      "city": "Boulder, CO",
+      "latitude": 40.015,
+      "longitude": -105.2705,
       "url": "https://www.univision.com/local/denver-kcec",
       "enabled": false,
       "note": "Univision streams only in its app."
@@ -143,6 +171,9 @@
       "name": "My20",
       "channel": "20.1",
       "network": "MyNetworkTV",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://www.9news.com/watch",
       "enabled": false,
       "note": "No separate web stream; the 9NEWS page plays KUSA.",
@@ -157,6 +188,9 @@
       "name": "Telemundo Denver",
       "channel": "25.1",
       "network": "Telemundo",
+      "city": "Longmont, CO",
+      "latitude": 40.1672,
+      "longitude": -105.1019,
       "url": "https://www.telemundodenver.com/en-vivo/",
       "enabled": true
     },
@@ -166,9 +200,11 @@
       "name": "FOX31",
       "channel": "31.1",
       "network": "FOX",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://kdvr.com/live/fox31/",
-      "enabled": false,
-      "note": "Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+      "enabled": true
     },
     {
       "id": "kpjr",
@@ -176,6 +212,9 @@
       "name": "TBN Denver",
       "channel": "38.1",
       "network": "TBN",
+      "city": "Greeley, CO",
+      "latitude": 40.4233,
+      "longitude": -104.7091,
       "url": "https://www.tbn.org/live",
       "enabled": false,
       "note": "No stream found on the page."
@@ -186,6 +225,9 @@
       "name": "Daystar",
       "channel": "41.1",
       "network": "Daystar",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://www.daystar.com/live/",
       "enabled": true
     },
@@ -195,6 +237,9 @@
       "name": "UniMas Colorado",
       "channel": "50.1",
       "network": "UniMas",
+      "city": "Boulder, CO",
+      "latitude": 40.015,
+      "longitude": -105.2705,
       "url": "https://www.univision.com/unimas",
       "enabled": false,
       "note": "Univision streams only in its app."
@@ -205,6 +250,9 @@
       "name": "Estrella TV Denver",
       "channel": "53.1",
       "network": "Estrella TV",
+      "city": "Castle Rock, CO",
+      "latitude": 39.3722,
+      "longitude": -104.8561,
       "url": "https://www.estrellatv.com/live",
       "enabled": false,
       "note": "No stream found on the page."
@@ -215,6 +263,9 @@
       "name": "ION Denver",
       "channel": "59.1",
       "network": "ION",
+      "city": "Denver, CO",
+      "latitude": 39.7392,
+      "longitude": -104.9903,
       "url": "https://iontelevision.com/live",
       "enabled": false,
       "note": "ION streams only in its apps and FAST services."
@@ -225,6 +276,9 @@
       "name": "News5",
       "channel": "5.1",
       "network": "NBC",
+      "city": "Pueblo, CO",
+      "latitude": 38.2544,
+      "longitude": -104.6091,
       "url": "https://www.koaa.com/live",
       "enabled": true,
       "note": "Colorado Springs / Pueblo market."
@@ -235,6 +289,9 @@
       "name": "KKTV 11 News",
       "channel": "11.1",
       "network": "CBS",
+      "city": "Colorado Springs, CO",
+      "latitude": 38.8339,
+      "longitude": -104.8214,
       "url": "https://www.kktv.com/livestream/",
       "enabled": true,
       "note": "Colorado Springs / Pueblo market."
@@ -245,6 +302,9 @@
       "name": "KRDO 13",
       "channel": "13.1",
       "network": "ABC",
+      "city": "Colorado Springs, CO",
+      "latitude": 38.8339,
+      "longitude": -104.8214,
       "url": "https://krdo.com/livestream/",
       "enabled": true,
       "note": "Colorado Springs / Pueblo market."
@@ -255,9 +315,12 @@
       "name": "FOX21",
       "channel": "21.1",
       "network": "FOX",
+      "city": "Colorado Springs, CO",
+      "latitude": 38.8339,
+      "longitude": -104.8214,
       "url": "https://www.fox21news.com/live/",
-      "enabled": false,
-      "note": "Colorado Springs / Pueblo market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+      "enabled": true,
+      "note": "Colorado Springs / Pueblo market."
     },
     {
       "id": "kxtu",
@@ -265,9 +328,12 @@
       "name": "SOCO CW",
       "channel": "57.1",
       "network": "The CW",
+      "city": "Colorado Springs, CO",
+      "latitude": 38.8339,
+      "longitude": -104.8214,
       "url": "https://www.fox21news.com/live/",
       "enabled": false,
-      "note": "Colorado Springs / Pueblo market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+      "note": "Colorado Springs / Pueblo market. Its page plays FOX21 (KXRM), not SOCO CW."
     },
     {
       "id": "kkco",
@@ -275,6 +341,9 @@
       "name": "KKCO 11 News",
       "channel": "11.1",
       "network": "NBC",
+      "city": "Grand Junction, CO",
+      "latitude": 39.0639,
+      "longitude": -108.5506,
       "url": "https://www.kkco11news.com/livestream/",
       "enabled": true,
       "note": "Grand Junction / Western Slope market."
@@ -285,6 +354,9 @@
       "name": "KJCT News 8",
       "channel": "8.1",
       "network": "ABC",
+      "city": "Grand Junction, CO",
+      "latitude": 39.0639,
+      "longitude": -108.5506,
       "url": "https://www.kjct8.com/livestream/",
       "enabled": true,
       "note": "Grand Junction / Western Slope market."
@@ -295,9 +367,12 @@
       "name": "KREX 5",
       "channel": "5.1",
       "network": "CBS",
+      "city": "Grand Junction, CO",
+      "latitude": 39.0639,
+      "longitude": -108.5506,
       "url": "https://www.westernslopenow.com/live/",
       "enabled": false,
-      "note": "Grand Junction / Western Slope market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+      "note": "Grand Junction / Western Slope market. No live stream found on the page (Nexstar; the Denver and Colorado Springs Nexstar pages do stream). Paste a stream URL you are allowed to use to enable it."
     },
     {
       "id": "kfqx",
@@ -305,9 +380,12 @@
       "name": "FOX 4",
       "channel": "4.1",
       "network": "FOX",
+      "city": "Grand Junction, CO",
+      "latitude": 39.0639,
+      "longitude": -108.5506,
       "url": "https://www.westernslopenow.com/live/",
       "enabled": false,
-      "note": "Grand Junction / Western Slope market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+      "note": "Grand Junction / Western Slope market. No live stream found on the page (Nexstar; the Denver and Colorado Springs Nexstar pages do stream). Paste a stream URL you are allowed to use to enable it."
     },
     {
       "id": "kgwn",
@@ -315,6 +393,9 @@
       "name": "Wyoming News Now",
       "channel": "5.1",
       "network": "CBS",
+      "city": "Cheyenne, WY",
+      "latitude": 41.14,
+      "longitude": -104.8202,
       "url": "https://www.wyomingnewsnow.tv/livestream/",
       "enabled": true,
       "note": "Cheyenne market. Streams only during its newscasts; outside them the channel has nothing to play."
@@ -325,6 +406,9 @@
       "name": "KOB 4",
       "channel": "4.1",
       "network": "NBC",
+      "city": "Albuquerque, NM",
+      "latitude": 35.0844,
+      "longitude": -106.6504,
       "url": "https://www.kob.com/live/",
       "enabled": true,
       "note": "Albuquerque / Santa Fe market (includes southwest Colorado)."
@@ -335,6 +419,9 @@
       "name": "Telemundo Nuevo Mexico",
       "channel": "47.1",
       "network": "Telemundo",
+      "city": "Albuquerque, NM",
+      "latitude": 35.0844,
+      "longitude": -106.6504,
       "url": "https://www.telemundonuevomexico.com/ver/",
       "enabled": true,
       "note": "Albuquerque / Santa Fe market (includes southwest Colorado)."
@@ -345,6 +432,9 @@
       "name": "KOAT 7",
       "channel": "7.1",
       "network": "ABC",
+      "city": "Albuquerque, NM",
+      "latitude": 35.0844,
+      "longitude": -106.6504,
       "url": "https://www.koat.com/",
       "enabled": false,
       "note": "Albuquerque / Santa Fe market. Hearst stations stream only in their apps."
@@ -355,9 +445,12 @@
       "name": "KRQE 13",
       "channel": "13.1",
       "network": "FOX",
+      "city": "Albuquerque, NM",
+      "latitude": 35.0844,
+      "longitude": -106.6504,
       "url": "https://www.krqe.com/live/",
       "enabled": false,
-      "note": "Albuquerque / Santa Fe market. Nexstar sites show a bot check, so the page cannot be scraped. Paste a stream URL you are allowed to use to enable it."
+      "note": "Albuquerque / Santa Fe market. No live stream found on the page (Nexstar; the Denver and Colorado Springs Nexstar pages do stream). Paste a stream URL you are allowed to use to enable it."
     }
   ]
 }

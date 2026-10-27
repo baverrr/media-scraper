@@ -27,18 +27,21 @@ Honest caveat: stations' web streams often show their own news programming inste
 
 ### What works (Denver market)
 
-The Denver market reaches past the Denver TV market to every market that covers part of Colorado, plus Cheyenne: Colorado Springs / Pueblo, Grand Junction / Western Slope, Albuquerque / Santa Fe (southwest Colorado) and Cheyenne. It lists 30 stations; these 13 are enabled, and all but Wyoming News Now were tested playing in Jellyfin 12.2:
+The Denver market reaches past the Denver TV market to every market that covers part of Colorado, plus Cheyenne: Colorado Springs / Pueblo, Grand Junction / Western Slope, Albuquerque / Santa Fe (southwest Colorado) and Cheyenne. It lists 30 stations; these 16 are enabled, and all but Wyoming News Now were tested playing in Jellyfin 12.2:
 
 | Station | Channel | Network | Market |
 | --- | --- | --- | --- |
+| KWGN CW2 | 2.1 | The CW | Denver |
 | KCNC CBS Colorado | 4.1 | CBS | Denver |
 | KMGH Denver7 | 7.1 | ABC | Denver |
 | KUSA 9NEWS | 9.1 | NBC | Denver |
 | KDEN Telemundo Denver | 25.1 | Telemundo | Denver |
+| KDVR FOX31 | 31.1 | FOX | Denver |
 | KRMT Daystar | 41.1 | Daystar | Denver |
 | KOAA News5 | 5.1 | NBC | Colorado Springs / Pueblo |
 | KKTV 11 News | 11.1 | CBS | Colorado Springs / Pueblo |
 | KRDO 13 | 13.1 | ABC | Colorado Springs / Pueblo |
+| KXRM FOX21 | 21.1 | FOX | Colorado Springs / Pueblo |
 | KKCO 11 News | 11.1 | NBC | Grand Junction |
 | KJCT News 8 | 8.1 | ABC | Grand Junction |
 | KGWN Wyoming News Now | 5.1 | CBS | Cheyenne (only during its newscasts) |
@@ -47,14 +50,15 @@ The Denver market reaches past the Denver TV market to every market that covers 
 
 Stations are listed Denver first, then the neighboring markets: a local game goes to the first station carrying its network, so a Broncos game on NBC plays 9NEWS rather than an out-of-market NBC station. Channel numbers are the stations' own, so a few repeat across markets.
 
-The other 17 are listed but disabled, each with a note in the settings page:
+The other 14 are listed but disabled, each with a note in the settings page:
 
 | Why | Stations |
 | --- | --- |
-| Site shows a bot check (Nexstar) | KWGN CW2, KDVR FOX31, KXRM FOX21, KXTU SOCO CW, KREX 5, KFQX FOX 4, KRQE 13 |
+| No live stream found on the page (Nexstar sites outside Denver and Colorado Springs) | KREX 5, KFQX FOX 4, KRQE 13 |
 | Web stream is DRM-protected | KRMA Rocky Mountain PBS, KBDI PBS12 |
 | Streams only in the station's or network's app | KCEC Univision, KTFD UniMas, KPXC ION, KOAT 7 |
-| No live stream on the website | KCDO The Spot, KTVD My20, KPJR TBN, KETD Estrella TV |
+| No live stream on the website | KCDO The Spot, KPJR TBN, KETD Estrella TV |
+| The page plays another station's stream | KTVD My20 (plays 9NEWS), KXTU SOCO CW (plays FOX21) |
 
 Stations on Gray Television's site platform (KKTV, KKCO, KJCT and many others nationwide) stream through Google's ad-insertion service (DAI). The sidecar plays those streams, and reaches them through `dai.google.com` so they also work behind a DNS ad blocker such as AdGuard or Pi-hole, which blocks DAI's other hostname.
 
@@ -86,9 +90,13 @@ The sidecar does not get around bot checks, DRM or sign-ins. A disabled station 
 
 Use **Test now** on a station to see exactly what the sidecar finds (or why not): offline, DRM, bot check, no live manifest, embedded YouTube player, and so on.
 
+#### Coverage area
+
+To keep only stations near you, set **Coverage area** in the settings. Give a maximum distance in miles, and your location: type a latitude and longitude, or use **Use this device's location**. Browsers share a location only with pages served over HTTPS or from localhost. With no location set, distances are measured from the market's center (Denver for the Denver market). Enabled stations farther away than the limit stay out of Live TV and the Local Sports channel. Each station's distance is shown in the list. Stations you add yourself are always included unless you give them a latitude and longitude. 0 means no limit, which is the default. From Denver: Colorado Springs is 63 miles, Cheyenne 97, Pueblo 105, Grand Junction 196 and Albuquerque 334. So 120 miles keeps the Front Range and Cheyenne, 200 adds Grand Junction, and 340 adds Albuquerque.
+
 ### Other markets
 
-Markets are JSON files in [`sidecar/markets/`](sidecar/markets/): stations (id, call sign, name, channel, network, live page URL, optional `streamUrl`, `sportsAliases`, `note`, `enabled`) and local teams (`league` plus ESPN's team abbreviation or id, from the team's ESPN page URL). Add a file for your area, run the station tests from the settings page, and send a pull request. The plugin bundles every market file at build time.
+Markets are JSON files in [`sidecar/markets/`](sidecar/markets/): a `center` (city, latitude, longitude), stations (id, call sign, name, channel, network, `city`, `latitude`, `longitude`, live page URL, optional `streamUrl`, `sportsAliases`, `note`, `enabled`) and local teams (`league` plus ESPN's team abbreviation or id, from the team's ESPN page URL). Add a file for your area, run the station tests from the settings page, and send a pull request. The plugin bundles every market file at build time.
 
 ### Sidecar configuration
 

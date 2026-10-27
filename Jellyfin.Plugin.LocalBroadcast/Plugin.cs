@@ -43,6 +43,36 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             Configuration.StationsSeeded = true;
             SaveConfiguration();
         }
+        else if (AddStationLocations(Configuration, Market.Load(Configuration.Market)))
+        {
+            SaveConfiguration();
+        }
+    }
+
+    /// <summary>
+    /// Fills in the city and coordinates of stations seeded before market files had them, from
+    /// the bundled market's station with the same id.
+    /// </summary>
+    /// <param name="config">The plugin configuration.</param>
+    /// <param name="market">The bundled market.</param>
+    /// <returns>Whether anything changed.</returns>
+    internal static bool AddStationLocations(PluginConfiguration config, Market? market)
+    {
+        var changed = false;
+        foreach (var s in config.Stations)
+        {
+            if (s.Latitude is not null || market?.Stations.Find(m => string.Equals(m.Id, s.Id, StringComparison.OrdinalIgnoreCase)) is not { Latitude: not null } m)
+            {
+                continue;
+            }
+
+            s.City ??= m.City;
+            s.Latitude = m.Latitude;
+            s.Longitude = m.Longitude;
+            changed = true;
+        }
+
+        return changed;
     }
 
     /// <inheritdoc />

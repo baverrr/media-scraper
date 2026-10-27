@@ -54,25 +54,39 @@ public class SidecarClient
     }
 
     /// <summary>
-    /// The station list in the sidecar's JSON shape (camelCase, logo null when empty).
+    /// The station list in the sidecar's JSON shape (camelCase, logo null when empty). Stations
+    /// outside the coverage radius are sent disabled, with a note saying so.
     /// </summary>
-    /// <param name="stations">The stations.</param>
+    /// <param name="config">The plugin configuration.</param>
     /// <returns>Objects ready to serialize.</returns>
-    public static IReadOnlyList<object> ToSidecarStations(IEnumerable<Station> stations)
-        => stations.Select(s => (object)new
+    public static IReadOnlyList<object> ToSidecarStations(PluginConfiguration config)
+    {
+        var home = config.MaxDistanceMiles > 0 ? Coverage.Home(config) : null;
+        return config.Stations.Select(s =>
         {
-            id = s.Id.Trim().ToLowerInvariant(),
-            callSign = s.CallSign,
-            name = s.Name,
-            channel = s.Channel,
-            network = s.Network,
-            url = s.Url,
-            streamUrl = string.IsNullOrWhiteSpace(s.StreamUrl) ? null : s.StreamUrl.Trim(),
-            logo = string.IsNullOrWhiteSpace(s.Logo) ? null : s.Logo,
-            sportsAliases = (s.SportsAliases ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
-            note = string.IsNullOrWhiteSpace(s.Note) ? null : s.Note,
-            enabled = s.Enabled,
+            var inRange = Coverage.InRange(config, home, s);
+            var note = string.IsNullOrWhiteSpace(s.Note) ? null : s.Note;
+            if (s.Enabled && !inRange)
+            {
+                note = $"Outside the {config.MaxDistanceMiles}-mile coverage radius ({Coverage.DistanceMiles(home, s):0} miles away).";
+            }
+
+            return (object)new
+            {
+                id = s.Id.Trim().ToLowerInvariant(),
+                callSign = s.CallSign,
+                name = s.Name,
+                channel = s.Channel,
+                network = s.Network,
+                url = s.Url,
+                streamUrl = string.IsNullOrWhiteSpace(s.StreamUrl) ? null : s.StreamUrl.Trim(),
+                logo = string.IsNullOrWhiteSpace(s.Logo) ? null : s.Logo,
+                sportsAliases = (s.SportsAliases ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
+                note,
+                enabled = s.Enabled && inRange,
+            };
         }).ToList();
+    }
 
     /// <summary>
     /// The sports settings in the sidecar's JSON shape.
@@ -96,7 +110,7 @@ public class SidecarClient
     {
         using var request = new HttpRequestMessage(HttpMethod.Put, RequestUri(config, "/api/stations"))
         {
-            Content = JsonContent.Create(ToSidecarStations(config.Stations), options: JsonOptions),
+            Content = JsonContent.Create(ToSidecarStations(config), options: JsonOptions),
         };
         await SendAsync(config, request, cancellationToken).ConfigureAwait(false);
     }
