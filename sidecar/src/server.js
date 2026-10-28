@@ -55,6 +55,7 @@ const timezoneId = env.TZ || (await store.marketDefaults().catch(() => null))?.t
 try {
   if (timezoneId) new Intl.DateTimeFormat('en-US', { timeZone: timezoneId });
   config.timezone = timezoneId;
+  config.timezoneFromEnv = !!env.TZ; // TZ overrides the plugin's market time zone
 } catch {
   log.warn(`time zone "${timezoneId}" isn't one Node knows; the guide uses the host's time zone`);
 }

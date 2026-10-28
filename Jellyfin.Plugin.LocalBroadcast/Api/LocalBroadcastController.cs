@@ -180,7 +180,69 @@ public class LocalBroadcastController : ControllerBase
     /// <returns>Market ids and names.</returns>
     [HttpGet("Markets")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<object> Markets() => Ok(Market.Ids().Select(id => Market.Load(id)).Where(m => m is not null).Select(m => new { m!.Id, m.Name, Stations = m.Stations.Count, Teams = m.Teams.Count }));
+    public ActionResult<object> Markets()
+    {
+        var config = Config;
+        var selected = config.SelectedMarkets();
+        return Ok(Market.Ids().Concat(config.CustomMarkets.Select(c => c.Id))
+            .Select(id => Market.Find(id, config))
+            .OfType<Market>()
+            .Select(m => new
+            {
+                m.Id,
+                m.Name,
+                Stations = m.Stations.Count,
+                Teams = m.Teams.Count,
+                m.Custom,
+                Hidden = !m.Custom && config.HiddenMarkets.Contains(m.Id, StringComparer.OrdinalIgnoreCase),
+                Selected = selected.Contains(m.Id, StringComparer.OrdinalIgnoreCase),
+            }));
+    }
+
+    /// <summary>
+    /// Gets several markets' stations and teams as one (a station in more than one is listed once).
+    /// </summary>
+    /// <param name="ids">The market ids, comma separated, first one first.</param>
+    /// <returns>The combined market.</returns>
+    [HttpGet("Markets/Combined")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<Market> CombinedMarkets([FromQuery] string ids)
+    {
+        var config = Config;
+        // A market that isn't found any more is skipped, as everywhere else the selection is used.
+        var combined = Market.Combine((ids ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(id => Market.Find(id, config)));
+        return combined is null ? NotFound() : Ok(combined);
+    }
+
+    /// <summary>
+    /// Checks a market file before it's added as one of your own markets.
+    /// </summary>
+    /// <param name="request">The market file's JSON.</param>
+    /// <returns>Whether it's valid, its name and counts, and an id to use, or what's wrong.</returns>
+    [HttpPost("Markets/Validate")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<object> ValidateMarket([FromBody] MarketFileRequest request)
+    {
+        var problem = MarketFile.Check(request?.Json, out var market);
+        if (problem is not null || market is null)
+        {
+            return Ok(new { ok = false, error = problem });
+        }
+
+        return Ok(new { ok = true, id = MarketFile.NewId(market.Name, Config), name = market.Name, stations = market.Stations.Count, teams = market.Teams.Count });
+    }
+
+    /// <summary>
+    /// Downloads a market's file (bundled or your own), to edit, share or import elsewhere.
+    /// </summary>
+    /// <param name="id">The market id.</param>
+    /// <returns>The JSON file.</returns>
+    [HttpGet("Markets/{id}/Export")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult ExportMarket([FromRoute] string id)
+        => Market.FileJson(id, Config) is { } json ? File(System.Text.Encoding.UTF8.GetBytes(json), "application/json", id + ".json") : NotFound();
 
     /// <summary>
     /// Gets a bundled market's default stations and teams.
@@ -190,7 +252,7 @@ public class LocalBroadcastController : ControllerBase
     [HttpGet("Markets/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<Market> GetMarket([FromRoute] string id) => Market.Load(id) is { } m ? Ok(m) : NotFound();
+    public ActionResult<Market> GetMarket([FromRoute] string id) => Market.Find(id, Config) is { } m ? Ok(m) : NotFound();
 
     /// <summary>
     /// Gets local games on the air now and coming up, with the station airing each.
@@ -245,4 +307,15 @@ public class SignUpRequest : LoginRequest
     /// Gets or sets a value indicating whether the person accepted the site's terms.
     /// </summary>
     public bool AcceptTerms { get; set; }
+}
+
+/// <summary>
+/// A market file, as the settings page sends it.
+/// </summary>
+public class MarketFileRequest
+{
+    /// <summary>
+    /// Gets or sets the market file's JSON.
+    /// </summary>
+    public string Json { get; set; } = string.Empty;
 }

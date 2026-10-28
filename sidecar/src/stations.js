@@ -104,10 +104,14 @@ export function normalizeSports(raw = {}) {
     if (!/^[A-Za-z0-9-]{1,32}$/.test(team)) throw new Error(`team ${i + 1}: team must be an ESPN team id or abbreviation`);
     return { league, team, name: text(t?.name) || team };
   });
+  // The time zone of the plugin's first market, for newscast times; one Node doesn't know is dropped.
+  let timezone = text(raw.timezone) || null;
+  try { if (timezone) new Intl.DateTimeFormat('en-US', { timeZone: timezone }); } catch { timezone = null; }
   return {
     enabled: raw.enabled !== false,
     channel: text(raw.channel) || '1.1',
     teams,
+    timezone,
   };
 }
 

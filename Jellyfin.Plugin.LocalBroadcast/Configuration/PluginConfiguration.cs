@@ -168,9 +168,33 @@ public class PluginConfiguration : BasePluginConfiguration
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the market whose defaults were (or will be) loaded.
+    /// Gets or sets the market whose defaults were (or will be) loaded: the first of
+    /// <see cref="Markets"/>, kept for settings saved by earlier versions.
     /// </summary>
     public string Market { get; set; } = "denver";
+
+    /// <summary>
+    /// Gets or sets the markets whose stations and teams are loaded together (bundled ids or
+    /// your own markets' ids), first one first: its center and time zone are used. Empty means
+    /// just <see cref="Market"/>.
+    /// </summary>
+    public List<string> Markets { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets your own markets: saved from your stations, or imported market files.
+    /// </summary>
+    public List<CustomMarket> CustomMarkets { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the bundled markets hidden from the list.
+    /// </summary>
+    public List<string> HiddenMarkets { get; set; } = [];
+
+    /// <summary>
+    /// The markets whose defaults are used, first one first.
+    /// </summary>
+    /// <returns>Market ids.</returns>
+    public IReadOnlyList<string> SelectedMarkets() => Markets.Count > 0 ? Markets : [Market];
 
     /// <summary>
     /// Gets or sets the stations. Empty until seeded from the market defaults on first start.
@@ -256,6 +280,22 @@ public class GeoPoint
 }
 
 /// <summary>
+/// A market of your own, in the same format as the bundled market files.
+/// </summary>
+public class CustomMarket
+{
+    /// <summary>
+    /// Gets or sets the id (lowercase letters, digits and -).
+    /// </summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the market file's JSON.
+    /// </summary>
+    public string Json { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// A bundled market: its stations and local teams (sidecar/markets/*.json, embedded at build time).
 /// </summary>
 public class Market
@@ -283,6 +323,16 @@ public class Market
     /// Gets or sets the market's center, where coverage distances are measured from by default.
     /// </summary>
     public GeoPoint? Center { get; set; }
+
+    /// <summary>
+    /// Gets or sets the market's time zone (IANA, e.g. America/Denver), for newscast times.
+    /// </summary>
+    public string? Timezone { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this is one of your own markets.
+    /// </summary>
+    public bool Custom { get; set; }
 
     /// <summary>
     /// Gets or sets the stations.
@@ -325,6 +375,98 @@ public class Market
     }
 
     /// <summary>
+    /// Finds a market by id: one of your own, else a bundled one.
+    /// </summary>
+    /// <param name="id">The market id.</param>
+    /// <param name="config">The settings holding your own markets.</param>
+    /// <returns>The market, or null.</returns>
+    public static Market? Find(string id, PluginConfiguration? config)
+    {
+        var custom = config?.CustomMarkets.Find(c => string.Equals(c.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (custom is null)
+        {
+            return Load(id);
+        }
+
+        try
+        {
+            var market = Parse(custom.Json);
+            market.Id = custom.Id;
+            market.Custom = true;
+            return market;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The market file's JSON: your own market's, or the bundled file.
+    /// </summary>
+    /// <param name="id">The market id.</param>
+    /// <param name="config">The settings holding your own markets.</param>
+    /// <returns>The JSON, or null.</returns>
+    public static string? FileJson(string id, PluginConfiguration? config)
+    {
+        var custom = config?.CustomMarkets.Find(c => string.Equals(c.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (custom is not null)
+        {
+            return custom.Json;
+        }
+
+        using var stream = typeof(Market).Assembly.GetManifestResourceStream(ResourcePrefix + id + ".json");
+        if (stream is null)
+        {
+            return null;
+        }
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Several markets as one: their stations (a station in more than one keeps the first market's
+    /// entry) and teams (each once). The first market's center, time zone and sports channel win.
+    /// </summary>
+    /// <param name="markets">The markets, first one first.</param>
+    /// <returns>The combined market, or null when there are none.</returns>
+    public static Market? Combine(IEnumerable<Market?> markets)
+    {
+        var list = markets.OfType<Market>().ToList();
+        if (list.Count == 0)
+        {
+            return null;
+        }
+
+        var stations = new List<Station>();
+        var teams = new List<SportsTeam>();
+        foreach (var m in list)
+        {
+            stations.AddRange(m.Stations.Where(s => !stations.Exists(x => string.Equals(x.Id, s.Id, StringComparison.OrdinalIgnoreCase))));
+            teams.AddRange(m.Teams.Where(t => !teams.Exists(x => string.Equals(x.League, t.League, StringComparison.OrdinalIgnoreCase) && string.Equals(x.Team, t.Team, StringComparison.OrdinalIgnoreCase))));
+        }
+
+        return new Market
+        {
+            Id = string.Join(",", list.Select(m => m.Id)),
+            Name = string.Join(" + ", list.Select(m => m.Name)),
+            SportsChannel = list.Select(m => m.SportsChannel).FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)),
+            Center = list.Select(m => m.Center).FirstOrDefault(c => c is not null),
+            Timezone = list.Select(m => m.Timezone).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)),
+            Stations = stations,
+            Teams = teams,
+        };
+    }
+
+    /// <summary>
+    /// The selected markets (<see cref="PluginConfiguration.SelectedMarkets"/>) as one.
+    /// </summary>
+    /// <param name="config">The settings.</param>
+    /// <returns>The combined market, or null.</returns>
+    public static Market? Selected(PluginConfiguration config) => Combine(config.SelectedMarkets().Select(id => Find(id, config)));
+
+    /// <summary>
     /// Parses a market file (the sidecar's JSON format).
     /// </summary>
     /// <param name="json">The JSON.</param>
@@ -337,6 +479,7 @@ public class Market
             Name = raw.Name ?? string.Empty,
             SportsChannel = raw.SportsChannel,
             Center = raw.Center,
+            Timezone = raw.Timezone,
             Stations = (raw.Stations ?? []).Where(s => !string.IsNullOrWhiteSpace(s.Id)).Select(s => s.ToStation()).ToList(),
             Teams = (raw.Teams ?? []).Where(t => !string.IsNullOrWhiteSpace(t.League) && !string.IsNullOrWhiteSpace(t.Team)).ToList(),
         };
@@ -349,6 +492,8 @@ public class Market
         public string? SportsChannel { get; set; }
 
         public GeoPoint? Center { get; set; }
+
+        public string? Timezone { get; set; }
 
         public List<RawStation>? Stations { get; set; }
 

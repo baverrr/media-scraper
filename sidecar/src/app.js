@@ -489,7 +489,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       const hours = Math.min(Math.max(Number(url.searchParams.get('hours')) || 168, 1), 336);
       const { games } = await sportsState(hours);
       const channels = [...(sportsOn() ? [sportsChannel(store.sports)] : []), ...store.enabled()];
-      return send(res, 200, buildXmltv(channels, { hours, games, now: now(), timeZone: config.timezone }), 'application/xml');
+      return send(res, 200, buildXmltv(channels, { hours, games, now: now(), timeZone: (config.timezoneFromEnv && config.timezone) || store.sports.timezone || config.timezone }), 'application/xml');
     }
 
     // Local Sports: the station airing a local game right now (the earliest-started one), or the

@@ -117,6 +117,95 @@ public class CoverageTests
     }
 
     [Fact]
+    public void CombinesMarketsListingEachStationAndTeamOnce()
+    {
+        var a = Market.Parse("""{"name":"A","timezone":"America/Denver","center":{"city":"A","latitude":1,"longitude":2},"teams":[{"league":"nfl","team":"den","name":"Broncos"}],"stations":[{"id":"one","url":"https://a.example/1"},{"id":"shared","name":"From A","url":"https://a.example/s"}]}""");
+        a.Id = "a";
+        var b = Market.Parse("""{"name":"B","timezone":"America/Chicago","teams":[{"league":"NFL","team":"DEN","name":"Dup"},{"league":"nba","team":"chi","name":"Bulls"}],"stations":[{"id":"SHARED","name":"From B","url":"https://b.example/s"},{"id":"two","url":"https://b.example/2"}]}""");
+        b.Id = "b";
+        var m = Market.Combine([a, null, b])!;
+        Assert.Equal("a,b", m.Id);
+        Assert.Equal("A + B", m.Name);
+        Assert.Equal(["one", "shared", "two"], m.Stations.Select(s => s.Id));
+        Assert.Equal("From A", m.Stations[1].Name);
+        Assert.Equal(["Broncos", "Bulls"], m.Teams.Select(t => t.Name));
+        Assert.Equal("America/Denver", m.Timezone);
+        Assert.Equal("A", m.Center!.City);
+        Assert.Null(Market.Combine([]));
+    }
+
+    [Fact]
+    public void FindsYourOwnMarketsBeforeBundledOnesAndFallsBackToTheOldSetting()
+    {
+        var config = new PluginConfiguration { Market = "denver" };
+        Assert.Equal(["denver"], config.SelectedMarkets());
+        config.CustomMarkets.Add(new CustomMarket { Id = "springfield", Json = """{"name":"Springfield, ST","timezone":"America/Chicago","stations":[{"id":"kxyz","url":"https://kxyz.example/live"}]}""" });
+        config.CustomMarkets.Add(new CustomMarket { Id = "broken", Json = "{not json" });
+        config.Markets = ["springfield", "denver"];
+        var mine = Market.Find("springfield", config)!;
+        Assert.True(mine.Custom);
+        Assert.Equal("springfield", mine.Id);
+        Assert.Null(Market.Find("broken", config));
+        Assert.False(Market.Find("denver", config)!.Custom);
+        var selected = Market.Selected(config)!;
+        Assert.Equal("kxyz", selected.Stations[0].Id);
+        Assert.True(selected.Stations.Count > 20);
+        Assert.Equal("America/Chicago", JsonSerializer.SerializeToElement(SidecarClient.ToSidecarSports(config), SidecarClient.JsonOptions).GetProperty("timezone").GetString());
+        Assert.StartsWith("{", Market.FileJson("denver", config));
+        Assert.Contains("kxyz", Market.FileJson("springfield", config));
+    }
+
+    [Fact]
+    public void ChecksMarketFilesAndPicksUniqueIds()
+    {
+        Assert.Contains("empty", MarketFile.Check("", out _));
+        Assert.Contains("valid JSON", MarketFile.Check("{nope", out _));
+        Assert.Contains("\"name\"", MarketFile.Check("""{"stations":[{"id":"a","url":"https://a.example/"}]}""", out _));
+        Assert.Contains("no stations", MarketFile.Check("""{"name":"X","stations":[]}""", out _));
+        Assert.Contains("isn't valid", MarketFile.Check("""{"name":"X","stations":[{"id":"Bad Id","url":"https://a.example/"}]}""", out _));
+        Assert.Contains("twice", MarketFile.Check("""{"name":"X","stations":[{"id":"a","url":"https://a.example/"},{"id":"a","url":"https://a.example/2"}]}""", out _));
+        Assert.Contains("http(s)", MarketFile.Check("""{"name":"X","stations":[{"id":"a","url":"javascript:alert(1)"}]}""", out _));
+        Assert.Null(MarketFile.Check("""{"name":"Springfield, ST","stations":[{"id":"a","url":"https://a.example/"}]}""", out var ok));
+        Assert.Equal("Springfield, ST", ok!.Name);
+
+        const string Ok = """{"name":"X","stations":[{"id":"a","url":"https://a.example/"}]}""";
+        Assert.Null(MarketFile.Check(Ok, out _));
+        Assert.Contains("streamUrl", MarketFile.Check("""{"name":"X","stations":[{"id":"a","url":"https://a.example/","streamUrl":"ftp://x"}]}""", out _));
+        Assert.Contains("HH:MM", MarketFile.Check("""{"name":"X","stations":[{"id":"a","url":"https://a.example/","schedule":[{"days":"daily","start":"6:00","end":"07:00"}]}]}""", out _));
+        Assert.Contains("days", MarketFile.Check("""{"name":"X","stations":[{"id":"a","url":"https://a.example/","schedule":[{"days":["someday"],"start":"06:00","end":"07:00"}]}]}""", out _));
+        Assert.Null(MarketFile.Check("""{"name":"X","stations":[{"id":"a","url":"https://a.example/","schedule":[{"days":["Monday","sat"],"start":"06:00","end":"07:00"}]}]}""", out _));
+        Assert.Contains("unknown league", MarketFile.Check("""{"name":"X","teams":[{"league":"cricket","team":"x","name":"Y"}],"stations":[{"id":"a","url":"https://a.example/"}]}""", out _));
+        Assert.Contains("ESPN team", MarketFile.Check("""{"name":"X","teams":[{"league":"nfl","team":"../x","name":"Y"}],"stations":[{"id":"a","url":"https://a.example/"}]}""", out _));
+        Assert.Contains("can't be saved", MarketFile.Check("{\"name\":\"X\uFFFF\",\"stations\":[{\"id\":\"a\",\"url\":\"https://a.example/\"}]}", out _));
+
+        var config = new PluginConfiguration();
+        Assert.Equal("springfield-st", MarketFile.NewId("Springfield, ST", config));
+        Assert.Equal("denver-2", MarketFile.NewId("Denver", config));
+        config.CustomMarkets.Add(new CustomMarket { Id = "springfield-st" });
+        Assert.Equal("springfield-st-2", MarketFile.NewId("Springfield, ST", config));
+        Assert.Equal("combined-2", MarketFile.NewId("Combined", config));
+        Assert.Equal("market", MarketFile.NewId("!!!", config));
+    }
+
+    [Fact]
+    public void KeepsYourMarketsThroughJellyfinsXmlSettings()
+    {
+        var config = new PluginConfiguration { Markets = ["mine", "denver"], HiddenMarkets = ["other"] };
+        config.CustomMarkets.Add(new CustomMarket { Id = "mine", Json = "{\n  \"name\": \"Mine <& \\\"quoted\\\">\",\n  \"stations\": []\n}\n" });
+        config.Stations.Add(new Station { Id = "koat", Schedule = { new NewscastBlock { Days = { "mon", "tue" }, Start = "17:00", End = "17:30", Title = "News" } } });
+        var xml = new System.Xml.Serialization.XmlSerializer(typeof(PluginConfiguration));
+        using var buffer = new System.IO.MemoryStream();
+        xml.Serialize(buffer, config);
+        buffer.Position = 0;
+        var back = (PluginConfiguration)xml.Deserialize(buffer)!;
+        Assert.Equal(["mine", "denver"], back.Markets);
+        Assert.Equal(["other"], back.HiddenMarkets);
+        Assert.Equal(config.CustomMarkets[0].Json, back.CustomMarkets[0].Json);
+        Assert.Single(back.Stations[0].Schedule);
+        Assert.Equal(["mon", "tue"], back.Stations[0].Schedule[0].Days);
+    }
+
+    [Fact]
     public void ReadsNewscastDaysAsAListOrACommaSeparatedString()
     {
         var market = Market.Parse("""{"name":"T","stations":[{"id":"a","url":"https://a.example/","schedule":[{"days":"weekdays","start":"17:00","end":"17:30","title":"News"},{"days":["sat","sun"],"start":"18:00","end":"18:30","title":"Weekend"}]}]}""");
@@ -175,7 +264,7 @@ public class SidecarClientTests
         Assert.Contains("\"sportsAliases\":[\"Altitude Sports\",\"Altitude\"]", stations, StringComparison.Ordinal);
 
         var config = new PluginConfiguration { SportsEnabled = true, SportsChannel = " ", Teams = { new SportsTeam { League = " NFL ", Team = " den ", Name = "Broncos" } } };
-        Assert.Equal("""{"enabled":true,"channel":"1.1","teams":[{"league":"nfl","team":"den","name":"Broncos"}]}""", JsonSerializer.Serialize(SidecarClient.ToSidecarSports(config), SidecarClient.JsonOptions));
+        Assert.Equal("""{"enabled":true,"channel":"1.1","teams":[{"league":"nfl","team":"den","name":"Broncos"}],"timezone":"America/Denver"}""", JsonSerializer.Serialize(SidecarClient.ToSidecarSports(config), SidecarClient.JsonOptions));
     }
 
     [Fact]

@@ -55,7 +55,9 @@ test('station extras: manual stream URL and sports aliases', () => {
 
 test('sports settings validation', () => {
   const s = normalizeSports({ teams: [{ league: 'NFL', team: 'den', name: 'Broncos' }] });
-  assert.deepEqual(s, { enabled: true, channel: '1.1', teams: [{ league: 'nfl', team: 'den', name: 'Broncos' }] });
+  assert.deepEqual(s, { enabled: true, channel: '1.1', teams: [{ league: 'nfl', team: 'den', name: 'Broncos' }], timezone: null });
+  assert.equal(normalizeSports({ timezone: 'America/Chicago' }).timezone, 'America/Chicago');
+  assert.equal(normalizeSports({ timezone: 'Not/AZone' }).timezone, null);
   assert.throws(() => normalizeSports({ teams: [{ league: 'cricket', team: 'x' }] }), /unknown league/);
   assert.throws(() => normalizeSports({ teams: [{ league: 'nfl', team: '../x' }] }), /ESPN team id/);
 });
@@ -204,4 +206,21 @@ test('bundled market: logos for every station, and schedules that pass the stric
     assert.equal(normalizeSchedule(s.schedule, s.id, { strict: true }).length, (s.schedule || []).length);
   }
   assert.ok(m.stations.find(s => s.id === 'koat').schedule.length > 0);
+});
+
+test('guide time zone: TZ wins, else the plugin\'s market, else the market file\'s', async () => {
+  const http = await import('node:http');
+  const { createApp } = await import('../src/app.js');
+  const { normalizeStation } = await import('../src/stations.js');
+  const station = normalizeStation({ id: 'news', name: 'News', url: 'https://x.example/', schedule: [{ days: 'daily', start: '17:00', end: '17:30', title: 'News at 5' }] });
+  const store = { stations: [station], sports: { enabled: false, teams: [], timezone: 'America/New_York' }, enabled: () => [station], get: () => station };
+  const guide = async config => {
+    const app = createApp({ store, resolver: { resolve: async () => { throw new Error('unused'); } }, config, log: {}, now: () => Date.UTC(2026, 9, 28, 18) });
+    const server = http.createServer(app.handler);
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    try { return await (await fetch(`http://127.0.0.1:${server.address().port}/guide.xml?hours=12`)).text(); } finally { server.close(); }
+  };
+  // 17:00 New York (EDT) = 21:00 UTC; 17:00 Denver (MDT) = 23:00 UTC.
+  assert.match(await guide({ timezone: 'America/Denver' }), /start="20261028210000 \+0000"[^>]*>\n    <title lang="en">News at 5/);
+  assert.match(await guide({ timezone: 'America/Denver', timezoneFromEnv: true }), /start="20261028230000 \+0000"[^>]*>\n    <title lang="en">News at 5/);
 });
