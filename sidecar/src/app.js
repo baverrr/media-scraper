@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { timingSafeEqual } from 'node:crypto';
-import { buildM3u, buildXmltv, sportsChannel, SPORTS_ID } from './guide.js';
+import { buildM3u, buildXmltv, newscastSlots, sportsChannel, SPORTS_ID } from './guide.js';
 import { createSigner } from './sign.js';
 import { normalizeLogin } from './logins.js';
 import { isHls, isMaster, rewriteMaster, rewriteMedia, chosenVariantUrl, renditionUrls, proxyExtension } from './hls.js';
@@ -15,6 +15,7 @@ import { loopPlaylist, loopSegment, offAirClips, OFF_AIR_SECONDS } from './slate
 // its newscasts, so tuning in shows why instead of a playback error.
 export const SLATE_SECONDS = 6;
 const SLATE_PATH = new URL('../assets/slate.ts', import.meta.url);
+const SPORTS_LOGO_PATH = new URL('../assets/local-sports.png', import.meta.url);
 
 // A live playlist that repeats the slate. The sequence follows the clock, so every reload moves on
 // by the segments that have played; each repeat's timestamps carry on from the last (slate.js).
@@ -311,12 +312,24 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
   // the background at the lowest priority, one at a time and never in the last free slot, so tuning
   // in and local games don't wait for it. A station with nothing to play (one that streams only
   // during newscasts) is tried again after 5 minutes, doubling up to an hour, rather than every
-  // minute. Called every minute by the server.
+  // minute; but never later than its next newscast's start, and every 2 minutes during one, so it's
+  // ready when the newscast is. Called every minute by the server.
   // Whether a station changed in a way that matters for its stream ("keep ready" doesn't, so
   // toggling it doesn't drop every playing stream).
   const fingerprint = ({ keepReady, ...rest }) => JSON.stringify(rest);
   const warmBackoff = new Map(); // id -> { failures, until }
   const WARM_MIN_GAP_MS = 10 * 60_000;
+  const NEWSCAST_RETRY_MS = 2 * 60_000;
+  // The time zone newscast times are in: the guide's.
+  const guideTimeZone = () => (config.timezoneFromEnv && config.timezone) || store.sports.timezone || config.timezone;
+  // When to try a failed station again: after its backoff, or sooner for its newscasts.
+  function retryAt(station, backoffMs) {
+    const t = now();
+    const until = t + backoffMs;
+    const slots = newscastSlots(station, t, until, guideTimeZone());
+    if (slots.some(n => n.start <= t)) return t + Math.min(backoffMs, NEWSCAST_RETRY_MS);
+    return slots.length ? Math.min(until, slots[0].start) : until;
+  }
   async function warmStations() {
     const t = now();
     const stations = store.enabled().filter(s => s.keepReady && !sportsIds.has(s.id));
@@ -341,7 +354,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       } catch {
         if (edited()) return;
         const failures = (backoff?.failures ?? 0) + 1;
-        warmBackoff.set(station.id, { failures, until: now() + Math.min(5 * 60_000 * 2 ** (failures - 1), 3_600_000) });
+        warmBackoff.set(station.id, { failures, until: retryAt(station, Math.min(5 * 60_000 * 2 ** (failures - 1), 3_600_000)) });
       }
     }));
     return warmed.sort();
@@ -408,6 +421,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
   let slate = null;
   // One clip, looped; the same array each time, so slate.js counts its packets once.
   const slateClips = () => (slate ??= [readFileSync(config.slatePath || SLATE_PATH)]);
+  let sportsLogo;
 
   async function servePlaylist(req, res, station, which) {
     let pl;
@@ -484,12 +498,16 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
     let m;
 
     if (method === 'GET' && p === '/health') return send(res, 200, { ok: true, stations: store.enabled().length });
+    if (method === 'GET' && p === `/logo/${SPORTS_ID}.png`) {
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=86400' });
+      return res.end(sportsLogo ??= readFileSync(SPORTS_LOGO_PATH));
+    }
     if (method === 'GET' && p === '/playlist.m3u') return send(res, 200, buildM3u(await orderedStations(), baseUrl(req)), 'audio/x-mpegurl');
     if (method === 'GET' && p === '/guide.xml') {
       const hours = Math.min(Math.max(Number(url.searchParams.get('hours')) || 168, 1), 336);
       const { games } = await sportsState(hours);
       const channels = [...(sportsOn() ? [sportsChannel(store.sports)] : []), ...store.enabled()];
-      return send(res, 200, buildXmltv(channels, { hours, games, now: now(), timeZone: (config.timezoneFromEnv && config.timezone) || store.sports.timezone || config.timezone }), 'application/xml');
+      return send(res, 200, buildXmltv(channels, { hours, games, now: now(), timeZone: guideTimeZone() }), 'application/xml');
     }
 
     // Local Sports: the station airing a local game right now (the earliest-started one), or the

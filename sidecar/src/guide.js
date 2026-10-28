@@ -35,7 +35,8 @@ export function buildM3u(stations, baseUrl, group = 'Local Broadcast') {
       `tvg-id="${attr(s.id)}"`,
       `tvg-name="${attr(displayName(s))}"`,
       s.channel ? `tvg-chno="${attr(s.channel)}"` : null,
-      s.logo ? `tvg-logo="${attr(s.logo)}"` : null,
+      // Local Sports' logo is the sidecar's own (assets/local-sports.svg).
+      s.logo || s.id === SPORTS_ID ? `tvg-logo="${attr(s.logo || `${baseUrl}/logo/${SPORTS_ID}.png`)}"` : null,
       `group-title="${attr(s.id === SPORTS_ID ? 'Local Sports' : group)}"`,
     ].filter(Boolean);
     lines.push(`#EXTINF:-1 ${tags.join(' ')},${attr(displayName(s))}`);
