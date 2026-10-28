@@ -180,11 +180,22 @@
                 <p id="lbEmpty" class="fieldDescription">No stations.</p>
 
                 <h3 class="sectionTitle" style="margin-top:2em;">Market defaults</h3>
-                <div class="selectContainer">
-                    <select is="emby-select" id="lbMarket" label="Market"></select>
-                    <div class="fieldDescription">Bundled station lists and local teams. Missing your area? Add a file to <code>sidecar/markets/</code> in the project repository.</div>
+                <div class="fieldDescription">Station lists and local teams to start from. Tick one or more markets and load them: a station in more than one market appears once, and the main market (the first one ticked) sets the coverage center and the time zone for newscast times.</div>
+                <div id="lbMarkets" style="margin:1em 0;"></div>
+                <div class="fieldDescription" id="lbHiddenMarkets"></div>
+                <button is="emby-button" type="button" class="raised block emby-button" id="lbDefaults"><span>Load the ticked markets' stations and teams</span></button>
+                <h3 style="margin-top:1.5em;">Add a market</h3>
+                <div class="inputContainer">
+                    <input is="emby-input" type="text" id="lbNewMarketName" label="Name" placeholder="My stations" maxlength="80" />
+                    <div class="fieldDescription">Saves your current stations and teams as a market of your own, to load again later or export.</div>
                 </div>
-                <button is="emby-button" type="button" class="raised block emby-button" id="lbDefaults"><span>Load this market's stations and teams</span></button>
+                <button is="emby-button" type="button" class="raised block emby-button" id="lbSaveMarket"><span>Save current stations and teams as a market</span></button>
+                <div class="inputContainer" style="margin-top:1em;">
+                    <label for="lbImportFile" class="inputLabel">Import a market file</label>
+                    <input type="file" id="lbImportFile" accept=".json,application/json" />
+                    <div class="fieldDescription">A market file in the same format as the bundled ones (<code>sidecar/markets/*.json</code> in the project repository), e.g. one exported from another server.</div>
+                </div>
+                <div class="fieldDescription" id="lbMarketStatus" aria-live="polite"></div>
             </div>
         </div>
 
@@ -433,27 +444,200 @@
                         Dashboard.hideLoadingMsg();
                         loadCenter();
                         refreshStatus();
-                        api('GET', 'Markets').then(function (markets) {
-                            var sel = $('lbMarket');
-                            sel.innerHTML = '';
-                            markets.forEach(function (m) {
-                                var o = document.createElement('option');
-                                o.value = m.Id || m.id;
-                                o.textContent = (m.Name || m.name) + ' (' + (m.Stations || m.stations) + ' stations, ' + (m.Teams || m.teams) + ' teams)';
-                                sel.appendChild(o);
-                            });
-                            sel.value = config.Market || 'denver';
-                        });
+                        refreshMarkets();
                     });
                 }
 
                 function loadCenter() {
                     center = null;
-                    api('GET', 'Markets/' + encodeURIComponent(config.Market || 'denver')).then(function (m) {
+                    api('GET', 'Markets/' + encodeURIComponent(selectedMarkets()[0])).then(function (m) {
                         var c = m.Center || m.center;
                         if (c) center = { lat: c.Latitude != null ? c.Latitude : c.latitude, lon: c.Longitude != null ? c.Longitude : c.longitude, city: c.City || c.city };
                         render();
                     }, function () { render(); });
+                }
+
+                // Markets: bundled ones and your own (config.CustomMarkets), ticked ones in config.Markets
+                // (first = main). Everything about them is kept in config and saved with it.
+                var markets = [];
+
+                function selectedMarkets() {
+                    config.Markets = config.Markets || [];
+                    return config.Markets.length ? config.Markets : [config.Market || 'denver'];
+                }
+
+                function setMarkets(ids) {
+                    config.Markets = ids;
+                    config.Market = ids[0] || config.Market || 'denver';
+                }
+
+                function marketStatus(text, ok) { setLine($('lbMarketStatus'), text, ok); }
+
+                // One market added at a time: the list on the server only catches up once its save is done.
+                var addingMarket = false;
+
+                function refreshMarkets() {
+                    api('GET', 'Markets').then(function (list) {
+                        markets = list.map(function (m) {
+                            return { id: m.Id || m.id, name: m.Name || m.name, stations: m.Stations != null ? m.Stations : m.stations, teams: m.Teams != null ? m.Teams : m.teams, custom: !!(m.Custom || m.custom) };
+                        });
+                        // A ticked market that no longer exists (or no longer reads) has no row to untick.
+                        var known = function (id) { return markets.some(function (m) { return m.id === id; }); };
+                        var missing = (config.Markets || []).filter(function (id) { return !known(id); });
+                        if (missing.length && markets.length && !addingMarket) {
+                            var keep = config.Markets.filter(known);
+                            setMarkets(keep.length ? keep : [markets[0].id]);
+                            marketStatus('Unticked ' + missing.join(', ') + ': not found any more.', false);
+                            save().then(loadCenter);
+                        }
+                        renderMarkets();
+                    }, function () { marketStatus('Could not load the market list.', false); });
+                }
+
+                function renderMarkets() {
+                    var ids = selectedMarkets();
+                    config.HiddenMarkets = config.HiddenMarkets || [];
+                    var hidden = function (m) { return !m.custom && config.HiddenMarkets.indexOf(m.id) >= 0; };
+                    var box = $('lbMarkets');
+                    box.innerHTML = '';
+                    markets.filter(function (m) { return !hidden(m); }).forEach(function (m) {
+                        var ticked = ids.indexOf(m.id) >= 0;
+                        var r = textRow([m.name + (m.custom ? '  (yours)' : '') + (ids[0] === m.id ? '  -  main market' : ''), m.stations + ' stations, ' + m.teams + ' teams'], []);
+                        var check = document.createElement('input');
+                        check.type = 'checkbox';
+                        check.checked = ticked;
+                        check.title = 'Use this market';
+                        check.setAttribute('aria-label', 'Use ' + m.name);
+                        check.style.cssText = 'width:1.3em;height:1.3em;margin:0 1em 0 .5em;';
+                        check.addEventListener('change', function () {
+                            var now = selectedMarkets().filter(function (x) { return x !== m.id; });
+                            if (check.checked) now.push(m.id);
+                            if (!now.length) { check.checked = true; marketStatus('Keep at least one market ticked.', false); return; }
+                            setMarkets(now);
+                            save().then(function () { renderMarkets(); loadCenter(); });
+                        });
+                        r.row.insertBefore(check, r.row.firstChild);
+                        if (ticked && ids[0] !== m.id) {
+                            r.row.appendChild(iconButton('star', 'Make this the main market', function () {
+                                setMarkets([m.id].concat(selectedMarkets().filter(function (x) { return x !== m.id; })));
+                                save().then(function () { renderMarkets(); loadCenter(); });
+                            }));
+                        }
+                        r.row.appendChild(iconButton('download', 'Export this market file', function () { exportMarket(m); }));
+                        r.row.appendChild(m.custom
+                            ? iconButton('delete', 'Delete this market', function () { removeMarket(m); })
+                            : iconButton('visibility_off', 'Hide this bundled market', function () { removeMarket(m); }));
+                        box.appendChild(r.row);
+                    });
+                    var hiddenOnes = markets.filter(hidden);
+                    var line = $('lbHiddenMarkets');
+                    line.innerHTML = '';
+                    if (hiddenOnes.length) {
+                        line.appendChild(document.createTextNode('Hidden bundled markets: '));
+                        hiddenOnes.forEach(function (m, i) {
+                            var a = document.createElement('a');
+                            a.href = '#';
+                            a.className = 'button-link';
+                            a.textContent = 'show ' + m.name;
+                            a.addEventListener('click', function (e) {
+                                e.preventDefault();
+                                config.HiddenMarkets = config.HiddenMarkets.filter(function (x) { return x !== m.id; });
+                                save().then(renderMarkets);
+                            });
+                            if (i) line.appendChild(document.createTextNode(', '));
+                            line.appendChild(a);
+                        });
+                    }
+                }
+
+                function removeMarket(m) {
+                    var rest = selectedMarkets().filter(function (x) { return x !== m.id; });
+                    if (!rest.length) { Dashboard.alert('This is your only ticked market. Tick another one first.'); return; }
+                    if (m.custom) {
+                        if (!confirm('Delete your market "' + m.name + '"? Your stations stay as they are.')) return;
+                        config.CustomMarkets = (config.CustomMarkets || []).filter(function (c) { return c.Id !== m.id; });
+                        markets = markets.filter(function (x) { return x.id !== m.id; });
+                    } else {
+                        config.HiddenMarkets = (config.HiddenMarkets || []).concat([m.id]);
+                    }
+                    // The old setting stays the fallback when nothing is ticked, so don't leave it pointing here.
+                    if (config.Market === m.id) config.Market = rest[0] || 'denver';
+                    setMarkets(rest);
+                    save().then(function () { renderMarkets(); loadCenter(); });
+                }
+
+                function download(name, text) {
+                    var link = document.createElement('a');
+                    link.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+                    link.download = name;
+                    document.body.appendChild(link);
+                    link.click();
+                    setTimeout(function () { URL.revokeObjectURL(link.href); link.remove(); }, 1000);
+                }
+
+                function exportMarket(m) {
+                    ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('LocalBroadcast/Markets/' + encodeURIComponent(m.id) + '/Export'), dataType: 'text' })
+                        .then(function (text) { download(m.id + '.json', text); }, function () { marketStatus('Could not export ' + m.name + '.', false); });
+                }
+
+                // Adds a checked market file as one of your own markets (and ticks it). Resolves to whether
+                // it was added.
+                function addMarket(json) {
+                    if (addingMarket) {
+                        marketStatus('Still adding the last market; try again in a moment.', false);
+                        return Promise.resolve(false);
+                    }
+                    addingMarket = true;
+                    var done = function () { addingMarket = false; };
+                    marketStatus('Checking the market file...', null);
+                    return api('POST', 'Markets/Validate', { Json: json }).then(function (r) {
+                        if (!r.ok) { marketStatus(r.error, false); return false; }
+                        // The server picked the id from the saved settings; make it unique here too.
+                        var own = (config.CustomMarkets || []).map(function (c) { return c.Id; });
+                        var id = r.id;
+                        for (var n = 2; own.indexOf(id) >= 0; n++) id = r.id + '-' + n;
+                        var market = config.Market;
+                        config.CustomMarkets = (config.CustomMarkets || []).concat([{ Id: id, Json: json }]);
+                        setMarkets(selectedMarkets().concat([id]));
+                        return save().then(function (saved) {
+                            if (!saved) {
+                                // Take back only this market, so a later save doesn't store it half-added.
+                                config.CustomMarkets = config.CustomMarkets.filter(function (c) { return c.Id !== id; });
+                                config.Markets = (config.Markets || []).filter(function (x) { return x !== id; });
+                                config.Market = config.Market === id ? market : config.Market;
+                                return false;
+                            }
+                            marketStatus('Added "' + r.name + '" (' + r.stations + ' stations, ' + r.teams + ' teams) and ticked it.', true);
+                            refreshMarkets();
+                            loadCenter();
+                            return true;
+                        });
+                    }, function () { marketStatus('Could not check the market file.', false); return false; })
+                        .then(function (added) { done(); return !!added; }, function () { done(); return false; });
+                }
+
+                // The current stations and teams in the market file format.
+                function currentAsMarket(name, timezone) {
+                    var h = home();
+                    var stations = config.Stations.map(function (s) {
+                        var o = { id: String(s.Id || '').trim().toLowerCase(), name: s.Name, url: s.Url, enabled: s.Enabled !== false };
+                        ['CallSign', 'Channel', 'Network', 'StreamUrl', 'SignInUrl', 'SignUpUrl', 'Logo', 'City', 'Note'].forEach(function (k) {
+                            if (s[k]) o[k.charAt(0).toLowerCase() + k.slice(1)] = s[k];
+                        });
+                        if (s.Latitude != null && s.Longitude != null) { o.latitude = s.Latitude; o.longitude = s.Longitude; }
+                        var aliases = (s.SportsAliases || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+                        if (aliases.length) o.sportsAliases = aliases;
+                        if (s.Schedule && s.Schedule.length) {
+                            o.schedule = s.Schedule.map(function (b) { return { days: b.Days, start: b.Start, end: b.End, title: b.Title }; });
+                        }
+                        return o;
+                    });
+                    var m = { name: name, sportsChannel: config.SportsChannel || '1.1' };
+                    if (timezone) m.timezone = timezone;
+                    if (h) m.center = { city: h.city || name, latitude: h.lat, longitude: h.lon };
+                    m.teams = (config.Teams || []).map(function (t) { return { league: t.League, team: t.Team, name: t.Name }; });
+                    m.stations = stations;
+                    return JSON.stringify(m, null, 2) + '\n';
                 }
 
                 // Resolves to whether the settings were saved.
@@ -613,17 +797,39 @@
                     }, function () { setLine($('lbSidecarStatus'), 'Sync failed.', false); });
                 });
 
+                $('lbSaveMarket').addEventListener('click', function () {
+                    var name = $('lbNewMarketName').value.trim();
+                    if (!name) { Dashboard.alert('Enter a name for the market.'); return; }
+                    if (!config.Stations.length) { Dashboard.alert('There are no stations to save.'); return; }
+                    // The main market's time zone, read now (newscast times in the new market use it).
+                    api('GET', 'Markets/' + encodeURIComponent(selectedMarkets()[0])).then(function (m) { return m.Timezone || m.timezone || null; }, function () { return null; })
+                        .then(function (tz) { return addMarket(currentAsMarket(name, tz)); })
+                        .then(function (added) { if (added) $('lbNewMarketName').value = ''; });
+                });
+
+                $('lbImportFile').addEventListener('change', function () {
+                    var file = this.files && this.files[0];
+                    var input = this;
+                    if (!file) return;
+                    if (file.size > 1000000) { marketStatus('That file is too large for a market file.', false); input.value = ''; return; }
+                    var reader = new FileReader();
+                    reader.onload = function () { addMarket(String(reader.result)).then(function (added) { if (added) input.value = ''; }); };
+                    reader.onerror = function () { marketStatus('Could not read that file.', false); input.value = ''; };
+                    reader.readAsText(file);
+                });
+
                 $('lbDefaults').addEventListener('click', function () {
-                    var id = $('lbMarket').value;
-                    if (!id || !confirm('Replace your stations and teams with the bundled defaults for this market?')) return;
-                    api('GET', 'Markets/' + encodeURIComponent(id)).then(function (m) {
-                        config.Market = id;
+                    var ids = selectedMarkets();
+                    var names = ids.map(function (id) { var m = markets.find(function (x) { return x.id === id; }); return m ? m.name : id; });
+                    if (!confirm('Replace your stations and teams with those of ' + names.join(' + ') + '?')) return;
+                    api('GET', 'Markets/Combined?ids=' + encodeURIComponent(ids.join(','))).then(function (m) {
+                        setMarkets(ids);
                         config.Stations = m.Stations || m.stations || [];
                         config.Teams = m.Teams || m.teams || [];
                         config.SportsChannel = m.SportsChannel || m.sportsChannel || config.SportsChannel;
                         $('lbSportsChannel').value = config.SportsChannel || '1.1';
                         save().then(loadCenter);
-                    });
+                    }, function () { marketStatus('Could not load the ticked markets. Reload the page and try again.', false); });
                 });
 
                 $('lbLoginBox').addEventListener('submit', function (e) {

@@ -152,7 +152,14 @@ Each market file keeps the stations that don't work, turned off, with a note say
 
 ## Markets
 
-A market is a JSON file in [`sidecar/markets/`](sidecar/markets/) with its center, its stations and its local teams. The plugin bundles every market file at build time, and **Load this market's stations and teams** in the settings resets your list to a market's defaults.
+A market is a JSON file in [`sidecar/markets/`](sidecar/markets/) with its center, time zone, stations and local teams. The plugin bundles every market file at build time. In the settings, under **Market defaults**:
+
+- **Tick one or more markets** and choose **Load the ticked markets' stations and teams** to reset your list to them. A station in more than one market appears once. The main market (the first one ticked, or the one you star) sets the coverage center and the time zone for newscast times.
+- **Save current stations and teams as a market** keeps your edited list as a market of your own, to load again later.
+- **Import a market file** adds one in the same format, for example one exported from another server.
+- **Export** downloads any market's file. **Delete** removes one of your own; bundled markets can be hidden, and shown again.
+
+Your own markets are kept in the plugin's settings.
 
 Stations in one market file can come from several neighboring TV markets. The market's own stations come first, because a local game goes to the first station carrying its network. Channel numbers are the stations' own, so a few can repeat.
 
@@ -164,7 +171,7 @@ Missing your area? [CONTRIBUTING.md](CONTRIBUTING.md) shows the format and how t
 | --- | --- | --- |
 | `API_KEY` | none | Required for changes from the plugin (`X-Api-Key`). The compose file reads it from `LOCAL_BROADCAST_API_KEY` in `sidecar/.env`. |
 | `MARKET` | set in `compose.yaml` | Stations and teams used until the plugin sends its own. |
-| `TZ` | the market's | Time zone the station pages see (e.g. `America/Chicago`). |
+| `TZ` | the market's | Time zone the station pages see, and the guide's newscast times (e.g. `America/Chicago`). Set, it overrides the plugin's main market. |
 | `MAX_HEIGHT` | `1080` | Highest quality picked from a station's variants. |
 | `LOGIN_KEY` | generated | Encrypts saved station sign-ins (32 bytes: `openssl rand -base64 32`). The compose file reads it from `LOCAL_BROADCAST_LOGIN_KEY`. Unset, a key is generated in the data volume as `login.key`. |
 | `RESOLVE_TTL_MINUTES` | `30` | How long a found stream is reused (shorter when its token expires sooner). |

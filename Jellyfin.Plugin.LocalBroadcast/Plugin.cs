@@ -47,7 +47,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         else if (Configuration.StationDetailsVersion < StationDetailsVersion)
         {
             // Once per new kind of market detail; anything already set is kept.
-            AddStationDetails(Configuration, Market.Load(Configuration.Market));
+            AddStationDetails(Configuration, Market.Selected(Configuration));
             Configuration.StationDetailsVersion = StationDetailsVersion;
             SaveConfiguration();
         }

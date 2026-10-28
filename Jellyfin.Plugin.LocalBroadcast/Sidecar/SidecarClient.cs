@@ -102,6 +102,8 @@ public class SidecarClient
         enabled = config.SportsEnabled,
         channel = string.IsNullOrWhiteSpace(config.SportsChannel) ? "1.1" : config.SportsChannel.Trim(),
         teams = config.Teams.Select(t => new { league = t.League.Trim().ToLowerInvariant(), team = t.Team.Trim(), name = t.Name }).ToList(),
+        // The first market's time zone, for newscast times in the guide (null: the sidecar's own).
+        timezone = Market.Find(config.SelectedMarkets()[0], config)?.Timezone,
     };
 
     /// <summary>

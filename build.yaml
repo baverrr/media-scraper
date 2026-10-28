@@ -1,7 +1,7 @@
 ---
 name: "Local Broadcast"
 guid: "d0766040-c26a-4cc7-9c0b-c7064aa77001"
-version: "1.0.9.0"
+version: "1.1.0.0"
 targetAbi: "12.2.0.0"
 framework: "net10.0"
 overview: "Local TV stations' free web streams in Live TV, local sports first"
@@ -17,7 +17,8 @@ imageUrl: "https://raw.githubusercontent.com/baverrr/media-scraper/main/docs/ico
 artifacts:
 - "Jellyfin.Plugin.LocalBroadcast.dll"
 changelog: >
-  Station logos in Live TV and the guide for all 30 bundled stations. Stations
-  that stream only during newscasts (KOAT, KGWN) list their newscasts in the
-  guide at their times, with "Not streaming" between them. Stations set up by
-  an earlier version get their logos and newscast times automatically.
+  Markets: tick several markets and load them together (a station in more
+  than one appears once; the main market sets the coverage center and the
+  time zone for newscast times). Save your current stations and teams as a
+  market of your own, import or export market files, delete your own markets
+  and hide bundled ones.

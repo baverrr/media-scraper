@@ -38,7 +38,7 @@ public static class Coverage
             return new GeoPoint { Latitude = lat, Longitude = lon };
         }
 
-        return Market.Load(config.Market)?.Center;
+        return Market.Find(config.SelectedMarkets()[0], config)?.Center;
     }
 
     /// <summary>
