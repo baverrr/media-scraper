@@ -2,6 +2,14 @@
   {
     "versions": [
       {
+        "version": "1.1.2.0",
+        "changelog": "Stations that stream only during their newscasts are kept ready for them: a failed try is retried at the next newscast's start at the latest, and every 2 minutes during one, instead of up to an hour later. Local Sports now has a logo.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/baverrr/media-scraper/releases/download/v1.1.2/local-broadcast_1.1.2.0.zip",
+        "checksum": "632b75406ed12e158eb01e09caa7cd6f",
+        "timestamp": "2026-10-28T04:18:46Z"
+      },
+      {
         "version": "1.1.1.0",
         "changelog": "Market files: an import in the wrong layout now says which field is wrong and what belongs there, instead of \"isn't valid JSON\" and .NET type names. A market message no longer stays on screen after your next market action.",
         "targetAbi": "12.2.0.0",
