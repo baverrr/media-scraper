@@ -41,35 +41,61 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             }
 
             Configuration.StationsSeeded = true;
+            Configuration.StationDetailsVersion = StationDetailsVersion; // seeded with them already
             SaveConfiguration();
         }
-        else if (AddStationLocations(Configuration, Market.Load(Configuration.Market)))
+        else if (Configuration.StationDetailsVersion < StationDetailsVersion)
         {
+            // Once per new kind of market detail; anything already set is kept.
+            AddStationDetails(Configuration, Market.Load(Configuration.Market));
+            Configuration.StationDetailsVersion = StationDetailsVersion;
             SaveConfiguration();
         }
     }
 
     /// <summary>
-    /// Fills in the city and coordinates of stations seeded before market files had them, from
-    /// the bundled market's station with the same id.
+    /// Which market details <see cref="AddStationDetails"/> fills in: 1 = locations, logos and
+    /// newscast times. Raise it when it learns another.
+    /// </summary>
+    internal const int StationDetailsVersion = 1;
+
+    /// <summary>
+    /// Fills in what market files gained after a station was set up, from the bundled market's
+    /// station with the same id: its city and coordinates, logo and newscast schedule. Anything
+    /// already set is kept.
     /// </summary>
     /// <param name="config">The plugin configuration.</param>
     /// <param name="market">The bundled market.</param>
     /// <returns>Whether anything changed.</returns>
-    internal static bool AddStationLocations(PluginConfiguration config, Market? market)
+    internal static bool AddStationDetails(PluginConfiguration config, Market? market)
     {
         var changed = false;
         foreach (var s in config.Stations)
         {
-            if (s.Latitude is not null || market?.Stations.Find(m => string.Equals(m.Id, s.Id, StringComparison.OrdinalIgnoreCase)) is not { Latitude: not null } m)
+            if (market?.Stations.Find(m => string.Equals(m.Id, s.Id, StringComparison.OrdinalIgnoreCase)) is not { } m)
             {
                 continue;
             }
 
-            s.City ??= m.City;
-            s.Latitude = m.Latitude;
-            s.Longitude = m.Longitude;
-            changed = true;
+            if (s.Latitude is null && m.Latitude is not null)
+            {
+                s.City ??= m.City;
+                s.Latitude = m.Latitude;
+                s.Longitude = m.Longitude;
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(s.Logo) && !string.IsNullOrWhiteSpace(m.Logo))
+            {
+                s.Logo = m.Logo;
+                changed = true;
+            }
+
+            if (s.Schedule.Count == 0 && m.Schedule.Count > 0)
+            {
+                s.Schedule = m.Schedule;
+                changed = true;
+            }
         }
 
         return changed;

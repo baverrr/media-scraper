@@ -108,12 +108,43 @@ public class CoverageTests
     public void FillsInLocationsForStationsSeededBeforeTheyExisted()
     {
         var config = new PluginConfiguration { Stations = { new Station { Id = "koaa" }, new Station { Id = "mine" }, new Station { Id = "kusa", Latitude = 1, Longitude = 2 } } };
-        Assert.True(Plugin.AddStationLocations(config, Market.Load("denver")));
+        Assert.True(Plugin.AddStationDetails(config, Market.Load("denver")));
         Assert.Equal("Pueblo, CO", config.Stations[0].City);
         Assert.NotNull(config.Stations[0].Latitude);
         Assert.Null(config.Stations[1].Latitude);
         Assert.Equal(1, config.Stations[2].Latitude);
-        Assert.False(Plugin.AddStationLocations(config, Market.Load("denver")));
+        Assert.False(Plugin.AddStationDetails(config, Market.Load("denver")));
+    }
+
+    [Fact]
+    public void ReadsNewscastDaysAsAListOrACommaSeparatedString()
+    {
+        var market = Market.Parse("""{"name":"T","stations":[{"id":"a","url":"https://a.example/","schedule":[{"days":"weekdays","start":"17:00","end":"17:30","title":"News"},{"days":["sat","sun"],"start":"18:00","end":"18:30","title":"Weekend"}]}]}""");
+        Assert.Equal(["weekdays"], market.Stations[0].Schedule[0].Days);
+        Assert.Equal(["sat", "sun"], market.Stations[0].Schedule[1].Days);
+    }
+
+    [Fact]
+    public void FillsInLogosAndNewscastsButKeepsYourOwn()
+    {
+        var mine = new NewscastBlock { Days = { "mon" }, Start = "09:00", End = "09:30", Title = "Mine" };
+        var config = new PluginConfiguration
+        {
+            Stations =
+            {
+                new Station { Id = "koat", Latitude = 1, Longitude = 2 },
+                new Station { Id = "kgwn", Latitude = 1, Longitude = 2, Logo = "https://logo.example/kgwn.png", Schedule = { mine } },
+            },
+        };
+        Assert.True(Plugin.AddStationDetails(config, Market.Load("denver")));
+        Assert.StartsWith("https://", config.Stations[0].Logo);
+        Assert.Contains(config.Stations[0].Schedule, b => b.Title == "KOAT Action 7 News at 5pm" && b.Start == "17:00" && b.Days.Contains("sat"));
+        Assert.Equal("https://logo.example/kgwn.png", config.Stations[1].Logo);
+        Assert.Equal([mine], config.Stations[1].Schedule);
+        Assert.False(Plugin.AddStationDetails(config, Market.Load("denver")));
+
+        var sent = JsonSerializer.SerializeToElement(SidecarClient.ToSidecarStations(config), SidecarClient.JsonOptions);
+        Assert.Equal("17:00", sent[0].GetProperty("schedule").EnumerateArray().First(b => b.GetProperty("title").GetString() == "KOAT Action 7 News at 5pm").GetProperty("start").GetString());
     }
 }
 
@@ -132,7 +163,7 @@ public class SidecarClientTests
         var json = JsonSerializer.Serialize(
             SidecarClient.ToSidecarStations(new PluginConfiguration { Stations = { new Station { Id = " KUSA ", CallSign = "KUSA", Name = "9NEWS", Url = "https://x", Logo = " " } } }),
             SidecarClient.JsonOptions);
-        Assert.Equal("""[{"id":"kusa","callSign":"KUSA","name":"9NEWS","channel":"","network":"","url":"https://x","streamUrl":null,"signInUrl":null,"signUpUrl":null,"logo":null,"sportsAliases":[],"keepReady":false,"note":null,"enabled":true}]""", json);
+        Assert.Equal("""[{"id":"kusa","callSign":"KUSA","name":"9NEWS","channel":"","network":"","url":"https://x","streamUrl":null,"signInUrl":null,"signUpUrl":null,"logo":null,"sportsAliases":[],"keepReady":false,"schedule":[],"note":null,"enabled":true}]""", json);
     }
 
     [Fact]

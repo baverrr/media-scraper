@@ -16,6 +16,39 @@ function httpUrl(value, what) {
   return url.href;
 }
 
+const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const DAY_GROUPS = { daily: DAYS, weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'], weekends: ['sat', 'sun'] };
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// A station's newscasts, for one that streams only during them: [{ days, start, end, title }], times
+// "HH:MM" in the market's time zone (an end before the start runs past midnight). The guide shows
+// them instead of hour-long "Live" blocks.
+// Invalid blocks are dropped (`strict` throws instead, for checking market files), so one mistyped
+// time doesn't reject every station's settings.
+export function normalizeSchedule(raw, id, { strict = false } = {}) {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    if (strict) throw new Error(`station ${id}: schedule must be a list`);
+    return [];
+  }
+  return raw.flatMap((b, i) => {
+    try { return [scheduleBlock(b, i, id)]; } catch (e) { if (strict) throw e; return []; }
+  });
+}
+
+function scheduleBlock(b, i, id) {
+  const what = `station ${id}: schedule ${i + 1}`;
+  // "mon", "Monday", "weekdays"...
+  const days = (Array.isArray(b?.days) ? b.days : text(b?.days).split(','))
+    .map(d => text(d).toLowerCase())
+    .flatMap(d => DAY_GROUPS[d] || [d.slice(0, 3)]);
+  if (!days.length || days.some(d => !DAYS.includes(d))) throw new Error(`${what}: days must be mon..sun, weekdays, weekends or daily`);
+  const start = text(b?.start);
+  const end = text(b?.end);
+  if (!HHMM.test(start) || !HHMM.test(end) || start === end) throw new Error(`${what}: start and end must be different HH:MM times`);
+  return { days: DAYS.filter(d => days.includes(d)), start, end, title: text(b?.title) || 'Newscast' };
+}
+
 export function normalizeStation(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('station must be an object');
   const id = text(raw.id).toLowerCase();
@@ -44,6 +77,7 @@ export function normalizeStation(raw) {
     signUpUrl: signUpUrl ? httpUrl(signUpUrl, `station ${id}: signUpUrl`) : null,
     logo: logo || null,
     sportsAliases: aliases.map(text).filter(Boolean),
+    schedule: normalizeSchedule(raw.schedule, id),
     // Keep this station's stream resolved in the background, so tuning in is instant.
     keepReady: raw.keepReady === true,
     // Why a station is disabled, shown in the plugin settings.
@@ -89,6 +123,8 @@ export async function listMarkets(dir) {
 export async function loadMarket(dir, id) {
   if (!ID_RE.test(String(id))) throw new Error(`invalid market id "${id}"`);
   const m = JSON.parse(await readFile(path.join(dir, `${id}.json`), 'utf8'));
+  // A market file's schedules are checked strictly: a mistake there should fail, not vanish.
+  for (const s of m.stations || []) normalizeSchedule(s.schedule, s.id, { strict: true });
   return {
     id,
     name: m.name || id,

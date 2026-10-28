@@ -50,6 +50,14 @@ const logins = await new LoginStore({ dataDir: config.dataDir, key: parseKey(env
 
 // The browser's time zone: TZ, else the market's (markets/<id>.json "timezone").
 const timezoneId = env.TZ || (await store.marketDefaults().catch(() => null))?.timezone || undefined;
+// The guide's newscast times. A zone Intl doesn't know (TZ=:/etc/localtime, a typo) falls back to
+// the host's, so the guide still works.
+try {
+  if (timezoneId) new Intl.DateTimeFormat('en-US', { timeZone: timezoneId });
+  config.timezone = timezoneId;
+} catch {
+  log.warn(`time zone "${timezoneId}" isn't one Node knows; the guide uses the host's time zone`);
+}
 const resolver = new Resolver({ scraperPath, ytDlp: config.ytDlp, maxHeight: config.maxHeight, channel: config.browserChannel, timezoneId, log });
 const app = createApp({ store, resolver, sports, logins, config, log });
 const resolve = app.cache.resolveFn;

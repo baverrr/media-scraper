@@ -736,6 +736,8 @@
                         Latitude: lat,
                         Longitude: lon,
                         Note: existing ? existing.Note : null,
+                        // Not in the form: kept from the station as it was.
+                        Schedule: existing && existing.Schedule ? existing.Schedule : [],
                         // A pasted stream URL turns a station the market file disabled back on.
                         Enabled: existing ? (existing.Enabled || (!!streamUrl && streamUrl !== existing.StreamUrl)) : true
                     };

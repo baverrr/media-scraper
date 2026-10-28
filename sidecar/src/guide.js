@@ -104,10 +104,68 @@ function gameSlot(game, forSportsChannel) {
   };
 }
 
+// The offset of `timeZone` from UTC at `ms`, in ms.
+function zoneOffset(ms, timeZone) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(ms)).map(p => [p.type, p.value]));
+  return Date.UTC(+parts.year, parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second) - Math.floor(ms / 1000) * 1000;
+}
+
+// UTC ms of a wall-clock time in `timeZone`. A time repeated when clocks go back is the first one; a
+// time skipped when they go forward lands an hour later (02:30 on the spring-forward day is 03:30).
+export function zonedTime(y, m, d, hh, mm, timeZone) {
+  const wall = Date.UTC(y, m, d, hh, mm);
+  const offsets = [...new Set([zoneOffset(wall - 86_400_000, timeZone), zoneOffset(wall + 86_400_000, timeZone)])];
+  const fits = offsets.map(o => wall - o).filter(t => t + zoneOffset(t, timeZone) === wall);
+  // In a gap neither offset fits: the earlier (pre-change) one puts it after the gap.
+  return fits.length ? Math.min(...fits) : wall - Math.min(...offsets);
+}
+
+// A station's newscasts (normalizeSchedule) as slots in [from, to), in `timeZone`.
+export function newscastSlots(station, from, to, timeZone) {
+  if (!station.schedule?.length) return [];
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short' });
+  const seen = new Set();
+  const out = [];
+  for (let t = from - 86_400_000; t < to + 86_400_000; t += 21_600_000) { // every 6 h: no day missed across DST
+    const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map(x => [x.type, x.value]));
+    const key = `${p.year}-${p.month}-${p.day}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const day = p.weekday.toLowerCase().slice(0, 3);
+    for (const b of station.schedule || []) {
+      if (!b.days.includes(day)) continue;
+      const [sh, sm] = b.start.split(':').map(Number);
+      const [eh, em] = b.end.split(':').map(Number);
+      const start = zonedTime(+p.year, p.month - 1, +p.day, sh, sm, timeZone);
+      // At least its listed length: a block inside the spring-forward gap moves an hour later whole.
+      const minutes = (eh * 60 + em - (sh * 60 + sm) + 1440) % 1440;
+      const stop = Math.max(zonedTime(+p.year, p.month - 1, +p.day + (b.end <= b.start ? 1 : 0), eh, em, timeZone), start + minutes * 60_000);
+      if (stop > from && start < to) {
+        out.push({ start, stop, title: b.title, desc: `Live on ${displayName(station)}'s web stream.`, categories: ['News'], live: true });
+      }
+    }
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+// `slots` with the time `taken` cut out of them (split where a taken slot is in the middle).
+function without(slots, taken) {
+  let out = slots;
+  for (const t of taken) {
+    out = out.flatMap(s => (t.stop <= s.start || t.start >= s.stop ? [s]
+      : [{ ...s, stop: t.start }, { ...s, start: t.stop }].filter(p => p.start < p.stop)));
+  }
+  return out;
+}
+
 // Placeholder schedule: back-to-back "Live: <station>" blocks aligned to the hour, starting one
 // block before now so the current block always exists. Local games (`games`: [{ event, station }])
 // replace the blocks on their station and fill the Local Sports channel when it's in the list.
-export function buildXmltv(stations, { now = Date.now(), hours = 48, blockMinutes = 60, games = [] } = {}) {
+// A station with a newscast schedule shows its newscasts at their times, and "Not streaming" between
+// them (in `timeZone`, the market's).
+export function buildXmltv(stations, { now = Date.now(), hours = 48, blockMinutes = 60, games = [], timeZone } = {}) {
   const block = blockMinutes * 60_000;
   const start = Math.floor(now / block) * block - block;
   const end = now + hours * 3_600_000;
@@ -122,12 +180,23 @@ export function buildXmltv(stations, { now = Date.now(), hours = 48, blockMinute
   const inWindow = games.filter(g => g.event.end > start && g.event.start < end);
   for (const s of stations) {
     const isSports = s.id === SPORTS_ID;
-    const own = nonOverlapping(inWindow.filter(g => isSports || g.station.id === s.id).map(g => gameSlot(g, isSports)))
+    const gameSlots = nonOverlapping(inWindow.filter(g => isSports || g.station.id === s.id).map(g => gameSlot(g, isSports)));
+    // Newscasts give way to a game on the same station: cut around it.
+    const newscasts = isSports ? [] : without(newscastSlots(s, start, end, timeZone), gameSlots);
+    const own = nonOverlapping([...gameSlots, ...newscasts])
       .map(p => ({ ...p, start: Math.max(p.start, start), stop: Math.min(p.stop, end) }))
       .filter(p => p.start < p.stop);
+    const scheduled = !isSports && s.schedule?.length > 0;
     const placeholder = (a, b) => (isSports
       ? { start: a, stop: b, title: 'No local game on the air', desc: 'Local teams\' games appear here while a station is broadcasting them.', categories: ['Sports'], live: false }
-      : {
+      : scheduled ? {
+        start: a,
+        stop: b,
+        title: 'Not streaming',
+        desc: `${s.name || s.callSign || s.id} streams only during its newscasts.`,
+        categories: ['News'],
+        live: false,
+      } : {
         start: a,
         stop: b,
         title: `Live: ${s.name || s.callSign || s.id}`,
