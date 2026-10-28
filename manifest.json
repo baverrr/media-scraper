@@ -2,6 +2,14 @@
   {
     "versions": [
       {
+        "version": "1.1.0.0",
+        "changelog": "Markets: tick several markets and load them together (a station in more than one appears once; the main market sets the coverage center and the time zone for newscast times). Save your current stations and teams as a market of your own, import or export market files, delete your own markets and hide bundled ones.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/baverrr/media-scraper/releases/download/v1.1.0/local-broadcast_1.1.0.0.zip",
+        "checksum": "8373c7914879a2b842a05cb3fb855e72",
+        "timestamp": "2026-10-28T01:02:37Z"
+      },
+      {
         "version": "1.0.9.0",
         "changelog": "Station logos in Live TV and the guide for all 30 bundled stations. Stations that stream only during newscasts (KOAT, KGWN) list their newscasts in the guide at their times, with \"Not streaming\" between them. Stations set up by an earlier version get their logos and newscast times automatically.",
         "targetAbi": "12.2.0.0",
