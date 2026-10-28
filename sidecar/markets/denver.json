@@ -75,7 +75,8 @@
       "latitude": 39.7392,
       "longitude": -104.9903,
       "url": "https://kdvr.com/live/kwgn/",
-      "enabled": true
+      "enabled": true,
+      "logo": "https://upload.wikimedia.org/wikipedia/en/thumb/3/3a/KWGN-TV_logo.svg/500px-KWGN-TV_logo.svg.png"
     },
     {
       "id": "kcdo",
@@ -88,7 +89,8 @@
       "longitude": -103.2077,
       "url": "https://www.thespottv.com/denver-3",
       "enabled": false,
-      "note": "No live stream online: The Spot is on antenna, cable and satellite only."
+      "note": "No live stream online: The Spot is on antenna, cable and satellite only.",
+      "logo": "https://ewscripps.brightspotcdn.com/27/2e/baf970904b558de5dc2a1f436db9/thespot-denver3-cobalt-no-ew.png"
     },
     {
       "id": "kcnc",
@@ -100,7 +102,8 @@
       "latitude": 39.7392,
       "longitude": -104.9903,
       "url": "https://www.cbsnews.com/colorado/live/",
-      "enabled": true
+      "enabled": true,
+      "logo": "https://assets1.cbsnewsstatic.com/hub/i/2023/03/13/b2e4195b-6a24-4206-a745-761a276e881a/cbs-colorado-logo.jpg"
     },
     {
       "id": "krma",
@@ -113,7 +116,8 @@
       "longitude": -104.9903,
       "url": "https://www.rmpbs.org/livestream",
       "enabled": false,
-      "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt."
+      "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt.",
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b8/Rocky_Mountain_PBS.svg/500px-Rocky_Mountain_PBS.svg.png"
     },
     {
       "id": "kmgh",
@@ -125,7 +129,8 @@
       "latitude": 39.7392,
       "longitude": -104.9903,
       "url": "https://www.denver7.com/live",
-      "enabled": true
+      "enabled": true,
+      "logo": "https://ewscripps.brightspotcdn.com/2d/fc/2e0e94954eea932e89cdfa1e8cc5/kmgh-main-logo-160x80.png"
     },
     {
       "id": "kusa",
@@ -137,7 +142,8 @@
       "latitude": 39.7392,
       "longitude": -104.9903,
       "url": "https://www.9news.com/watch",
-      "enabled": true
+      "enabled": true,
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/KUSA_9_%282017%29.svg/500px-KUSA_9_%282017%29.svg.png"
     },
     {
       "id": "kbdi",
@@ -150,7 +156,8 @@
       "longitude": -105.0867,
       "url": "https://www.pbs12.org/livestream",
       "enabled": false,
-      "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt."
+      "note": "The web stream is DRM-protected (FairPlay/Widevine), which only the official players can decrypt.",
+      "logo": "https://www.pbs12.org/wp-content/themes/CPT12/img/_template/logo.png"
     },
     {
       "id": "kcec",
@@ -163,7 +170,8 @@
       "longitude": -105.2705,
       "url": "https://www.univision.com/local/denver-kcec",
       "enabled": false,
-      "note": "Univision streams live only in its paid apps (Univision NOW, ViX Premium)."
+      "note": "Univision streams live only in its paid apps (Univision NOW, ViX Premium).",
+      "logo": "https://upload.wikimedia.org/wikipedia/en/4/41/Univision_Colorado_logo.png"
     },
     {
       "id": "ktvd",
@@ -180,7 +188,8 @@
       "sportsAliases": [
         "Altitude Sports",
         "Altitude"
-      ]
+      ],
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/KTVD_20_%282017%29.svg/500px-KTVD_20_%282017%29.svg.png"
     },
     {
       "id": "kden",
@@ -192,7 +201,8 @@
       "latitude": 40.1672,
       "longitude": -105.1019,
       "url": "https://www.telemundodenver.com/en-vivo/",
-      "enabled": true
+      "enabled": true,
+      "logo": "https://media.telemundodenver.com/2019/09/cropped-TLMD_Denver.png"
     },
     {
       "id": "kdvr",
@@ -204,7 +214,8 @@
       "latitude": 39.7392,
       "longitude": -104.9903,
       "url": "https://kdvr.com/live/fox31/",
-      "enabled": true
+      "enabled": true,
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Kdvr-primary.svg/500px-Kdvr-primary.svg.png"
     },
     {
       "id": "kpjr",
@@ -218,7 +229,8 @@
       "url": "https://www.tbnplus.com/p/wUwJ86KF",
       "enabled": false,
       "note": "TBN's live stream on TBN+ needs a signed-in account, and TBN+ signs in with an emailed code behind a CAPTCHA, which the sidecar can't do for you.",
-      "signInUrl": "https://www.tbnplus.com/login"
+      "signInUrl": "https://www.tbnplus.com/login",
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Trinity_Broadcasting_Network_logo_%282016%29.svg/500px-Trinity_Broadcasting_Network_logo_%282016%29.svg.png"
     },
     {
       "id": "krmt",
@@ -230,7 +242,8 @@
       "latitude": 39.7392,
       "longitude": -104.9903,
       "url": "https://www.daystar.com/live/",
-      "enabled": true
+      "enabled": true,
+      "logo": "https://daystar.com/hubfs/Logos/Daystar_Television_Network_Logo_dark.png"
     },
     {
       "id": "ktfd",
@@ -243,7 +256,8 @@
       "longitude": -105.2705,
       "url": "https://www.univision.com/unimas",
       "enabled": false,
-      "note": "UniMás streams live only in Univision's paid apps (Univision NOW, ViX Premium)."
+      "note": "UniMás streams live only in Univision's paid apps (Univision NOW, ViX Premium).",
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/KTFD_2021.svg/500px-KTFD_2021.svg.png"
     },
     {
       "id": "ketd",
@@ -256,7 +270,8 @@
       "longitude": -104.8561,
       "url": "https://www.estrellatv.com/en?section=livesection",
       "enabled": true,
-      "note": "Plays Estrella TV's national live stream from estrellatv.com."
+      "note": "Plays Estrella TV's national live stream from estrellatv.com.",
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/7/78/KETD_2020_Logo_%28cropped%29.webp"
     },
     {
       "id": "kpxc",
@@ -269,7 +284,8 @@
       "longitude": -104.9903,
       "url": "https://pluto.tv/us/live-tv/ion",
       "enabled": true,
-      "note": "Plays ION's national feed, from ION's own free channel on Pluto TV: KPXC's programmes, without its local breaks."
+      "note": "Plays ION's national feed, from ION's own free channel on Pluto TV: KPXC's programmes, without its local breaks.",
+      "logo": "https://iontelevision.com/og-image.jpg"
     },
     {
       "id": "koaa",
@@ -282,7 +298,8 @@
       "longitude": -104.6091,
       "url": "https://www.koaa.com/live",
       "enabled": true,
-      "note": "Colorado Springs / Pueblo market."
+      "note": "Colorado Springs / Pueblo market.",
+      "logo": "https://ewscripps.brightspotcdn.com/a9/18/e3e652be4a088413879ffc16038d/koaa-logo.png"
     },
     {
       "id": "kktv",
@@ -295,7 +312,8 @@
       "longitude": -104.8214,
       "url": "https://www.kktv.com/livestream/",
       "enabled": true,
-      "note": "Colorado Springs / Pueblo market."
+      "note": "Colorado Springs / Pueblo market.",
+      "logo": "https://webpubcontent.gray.tv/gray/arc-fusion-assets/images/logo-off-site/kktv.png"
     },
     {
       "id": "krdo",
@@ -308,7 +326,8 @@
       "longitude": -104.8214,
       "url": "https://krdo.com/livestream/",
       "enabled": true,
-      "note": "Colorado Springs / Pueblo market."
+      "note": "Colorado Springs / Pueblo market.",
+      "logo": "https://krdo.b-cdn.net/2019/11/cropped-krdo-logo-270x270.png"
     },
     {
       "id": "kxrm",
@@ -321,7 +340,8 @@
       "longitude": -104.8214,
       "url": "https://www.fox21news.com/live/",
       "enabled": true,
-      "note": "Colorado Springs / Pueblo market."
+      "note": "Colorado Springs / Pueblo market.",
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/KXRM-TV_%282022%29.svg/500px-KXRM-TV_%282022%29.svg.png"
     },
     {
       "id": "kxtu",
@@ -334,7 +354,8 @@
       "longitude": -104.8214,
       "url": "https://www.fox21news.com/live/",
       "enabled": false,
-      "note": "Colorado Springs / Pueblo market. SOCO CW has no free web stream: the FOX21 page plays KXRM, and Nexstar's other live streams need a sign-in."
+      "note": "Colorado Springs / Pueblo market. SOCO CW has no free web stream: the FOX21 page plays KXRM, and Nexstar's other live streams need a sign-in.",
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/KXTU2024.svg/500px-KXTU2024.svg.png"
     },
     {
       "id": "kkco",
@@ -347,7 +368,8 @@
       "longitude": -108.5506,
       "url": "https://www.kkco11news.com/livestream/",
       "enabled": true,
-      "note": "Grand Junction / Western Slope market."
+      "note": "Grand Junction / Western Slope market.",
+      "logo": "https://webpubcontent.gray.tv/gray/arc-fusion-assets/images/logo-off-site/kkco.png"
     },
     {
       "id": "kjct",
@@ -360,7 +382,8 @@
       "longitude": -108.5506,
       "url": "https://www.kjct8.com/livestream/",
       "enabled": true,
-      "note": "Grand Junction / Western Slope market."
+      "note": "Grand Junction / Western Slope market.",
+      "logo": "https://webpubcontent.gray.tv/gray/arc-fusion-assets/images/logo-off-site/kjct.png"
     },
     {
       "id": "krex",
@@ -373,7 +396,8 @@
       "longitude": -108.5506,
       "url": "https://www.westernslopenow.com/live/",
       "enabled": false,
-      "note": "Grand Junction / Western Slope market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it."
+      "note": "Grand Junction / Western Slope market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it.",
+      "logo": "https://upload.wikimedia.org/wikipedia/en/thumb/5/50/Krexlogo2025.svg/500px-Krexlogo2025.svg.png"
     },
     {
       "id": "kfqx",
@@ -386,7 +410,8 @@
       "longitude": -108.5506,
       "url": "https://www.westernslopenow.com/live/",
       "enabled": false,
-      "note": "Grand Junction / Western Slope market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it."
+      "note": "Grand Junction / Western Slope market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it.",
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/eb/KFQX2025.svg/500px-KFQX2025.svg.png"
     },
     {
       "id": "kgwn",
@@ -399,7 +424,86 @@
       "longitude": -104.8202,
       "url": "https://www.wyomingnewsnow.tv/livestream/",
       "enabled": true,
-      "note": "Cheyenne market. Streams only during its newscasts; at other times the channel shows a \"Nothing is streaming right now\" screen."
+      "note": "Cheyenne market. Streams only during its newscasts; the guide's newscast times are a best estimate (from 2024 listings). At other times the channel shows a \"Nothing is streaming right now\" screen.",
+      "logo": "https://bloximages.chicago2.vip.townnews.com/wyomingnewsnow.tv/content/tncms/custom/image/b30eca8e-535a-11ef-8536-1bbff9887b06.png",
+      "schedule": [
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "start": "06:00",
+          "end": "07:00",
+          "title": "Wyoming News Now at 6am"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "start": "12:00",
+          "end": "12:30",
+          "title": "Wyoming News Now at Noon"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "start": "17:30",
+          "end": "18:00",
+          "title": "Cheyenne News Now at 5:30"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "start": "18:00",
+          "end": "18:30",
+          "title": "Wyoming News Now at 6"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "start": "22:00",
+          "end": "22:35",
+          "title": "Wyoming News Now at 10"
+        },
+        {
+          "days": [
+            "sat"
+          ],
+          "start": "17:30",
+          "end": "18:00",
+          "title": "Wyoming News Now Weekend at 5:30"
+        },
+        {
+          "days": [
+            "sun"
+          ],
+          "start": "22:00",
+          "end": "22:30",
+          "title": "Wyoming News Now Weekend at 10"
+        }
+      ]
     },
     {
       "id": "kob",
@@ -412,7 +516,8 @@
       "longitude": -106.6504,
       "url": "https://www.kob.com/live/",
       "enabled": true,
-      "note": "Albuquerque / Santa Fe market (includes southwest Colorado)."
+      "note": "Albuquerque / Santa Fe market (includes southwest Colorado).",
+      "logo": "https://www.kob.com/wp-content/uploads/2022/04/main_logo.png"
     },
     {
       "id": "ktel",
@@ -425,7 +530,8 @@
       "longitude": -106.6504,
       "url": "https://www.telemundonuevomexico.com/ver/",
       "enabled": true,
-      "note": "Albuquerque / Santa Fe market (includes southwest Colorado)."
+      "note": "Albuquerque / Santa Fe market (includes southwest Colorado).",
+      "logo": "https://media.telemundonuevomexico.com/2024/08/KASA_station_logo_dark.png"
     },
     {
       "id": "koat",
@@ -438,7 +544,102 @@
       "longitude": -106.6504,
       "url": "https://www.koat.com/nowcast",
       "enabled": true,
-      "note": "Albuquerque / Santa Fe market. KOAT's NowCast page streams its newscasts live; between them the channel shows the \"Nothing is streaming right now\" screen."
+      "note": "Albuquerque / Santa Fe market. KOAT's NowCast page streams its newscasts live (the guide lists them); between them the channel shows the \"Nothing is streaming right now\" screen.",
+      "logo": "https://htv-prod-media.s3.amazonaws.com/htv_default_image/koat/logo.png",
+      "schedule": [
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "start": "04:30",
+          "end": "06:00",
+          "title": "KOAT Action 7 News at 4:30am"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "start": "06:00",
+          "end": "07:00",
+          "title": "KOAT Action 7 News at 6am"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "start": "16:00",
+          "end": "17:00",
+          "title": "KOAT Action 7 News at 4pm"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "start": "17:00",
+          "end": "17:30",
+          "title": "KOAT Action 7 News at 5pm"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat"
+          ],
+          "start": "18:00",
+          "end": "18:30",
+          "title": "KOAT Action 7 News at 6pm"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "start": "22:00",
+          "end": "22:30",
+          "title": "KOAT Action 7 News at 10pm"
+        },
+        {
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sun"
+          ],
+          "start": "22:30",
+          "end": "23:00",
+          "title": "KOAT Action 7 News at 10:30pm"
+        }
+      ]
     },
     {
       "id": "krqe",
@@ -451,7 +652,8 @@
       "longitude": -106.6504,
       "url": "https://www.krqe.com/live/",
       "enabled": false,
-      "note": "Albuquerque / Santa Fe market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it."
+      "note": "Albuquerque / Santa Fe market. Its site shows automated browsers a bot check (\"press and hold\"), which the sidecar doesn't get around. Paste a stream URL you are allowed to use to enable it.",
+      "logo": "https://upload.wikimedia.org/wikipedia/en/thumb/a/a8/KRQE_logo_without_CBS_eye.svg/500px-KRQE_logo_without_CBS_eye.svg.png"
     }
   ]
 }

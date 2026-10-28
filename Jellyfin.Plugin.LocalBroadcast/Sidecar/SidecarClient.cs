@@ -85,6 +85,7 @@ public class SidecarClient
                 logo = string.IsNullOrWhiteSpace(s.Logo) ? null : s.Logo,
                 sportsAliases = (s.SportsAliases ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
                 keepReady = config.KeepStreamsReady,
+                schedule = s.Schedule.Select(b => new { days = b.Days, start = b.Start, end = b.End, title = b.Title }).ToList(),
                 note,
                 enabled = s.Enabled && inRange,
             };

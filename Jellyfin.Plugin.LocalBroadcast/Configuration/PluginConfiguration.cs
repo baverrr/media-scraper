@@ -10,6 +10,33 @@ using MediaBrowser.Model.Plugins;
 namespace Jellyfin.Plugin.LocalBroadcast.Configuration;
 
 /// <summary>
+/// A newscast a station streams: on <see cref="Days"/>, from <see cref="Start"/> to <see cref="End"/>
+/// ("HH:MM", the market's time zone; an end before the start runs past midnight).
+/// </summary>
+public class NewscastBlock
+{
+    /// <summary>
+    /// Gets or sets the days: mon, tue, wed, thu, fri, sat, sun (or weekdays, weekends, daily).
+    /// </summary>
+    public List<string> Days { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the start time, "HH:MM".
+    /// </summary>
+    public string Start { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the end time, "HH:MM".
+    /// </summary>
+    public string End { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the newscast's title in the guide.
+    /// </summary>
+    public string Title { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// A local broadcast station whose website carries a live stream.
 /// </summary>
 public class Station
@@ -88,6 +115,12 @@ public class Station
     public string? SportsAliases { get; set; }
 
     /// <summary>
+    /// Gets or sets the station's newscasts, for one that streams only during them: the guide shows them at
+    /// their times (in the market's time zone) instead of hour-long "Live" blocks.
+    /// </summary>
+    public List<NewscastBlock> Schedule { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets a note from the market file, e.g. why the station is disabled.
     /// </summary>
     public string? Note { get; set; }
@@ -149,6 +182,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// once, so deleting every station or team doesn't bring the defaults back on restart.
     /// </summary>
     public bool StationsSeeded { get; set; }
+
+    /// <summary>
+    /// Gets or sets which bundled-market details (locations, logos, newscast times) were last filled
+    /// in for existing stations, so a logo you clear stays cleared.
+    /// </summary>
+    public int StationDetailsVersion { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether stations airing local games come first, with a
@@ -316,6 +355,32 @@ public class Market
         public List<SportsTeam>? Teams { get; set; }
     }
 
+    // A newscast in a market file: days is a list ("mon", "tue") or a comma-separated string
+    // ("weekdays"), as the sidecar accepts.
+    private sealed class RawNewscast
+    {
+        public JsonElement Days { get; set; }
+
+        public string Start { get; set; } = string.Empty;
+
+        public string End { get; set; } = string.Empty;
+
+        public string Title { get; set; } = string.Empty;
+
+        public NewscastBlock ToBlock() => new()
+        {
+            Days = Days.ValueKind switch
+            {
+                JsonValueKind.Array => Days.EnumerateArray().Select(d => d.ToString().Trim()).Where(d => d.Length > 0).ToList(),
+                JsonValueKind.String => (Days.GetString() ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList(),
+                _ => [],
+            },
+            Start = Start,
+            End = End,
+            Title = Title,
+        };
+    }
+
     // sportsAliases is a JSON array in the market files and a comma-separated string in the plugin.
     private sealed class RawStation
     {
@@ -348,6 +413,8 @@ public class Market
         [JsonPropertyName("sportsAliases")]
         public List<string>? SportsAliases { get; set; }
 
+        public List<RawNewscast>? Schedule { get; set; }
+
         public string? Note { get; set; }
 
         public bool Enabled { get; set; } = true;
@@ -368,6 +435,7 @@ public class Market
             Latitude = Latitude,
             Longitude = Longitude,
             SportsAliases = SportsAliases is { Count: > 0 } ? string.Join(", ", SportsAliases) : null,
+            Schedule = Schedule?.Select(b => b.ToBlock()).ToList() ?? [],
             Note = Note,
             Enabled = Enabled,
         };

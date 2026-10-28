@@ -129,3 +129,79 @@ test('bot-check pages are named as such; ordinary pages mentioning a CAPTCHA are
   assert.equal(isBotCheck(200, `Contact us (this form uses reCAPTCHA). ${'News story. '.repeat(200)}`), false);
   assert.equal(isBotCheck(404, 'Page not found'), false);
 });
+
+test('newscast schedules: validated, and shown at their local times with "Not streaming" between', async () => {
+  const { normalizeStation, normalizeSchedule } = await import('../src/stations.js');
+  const { buildXmltv } = await import('../src/guide.js');
+  assert.throws(() => normalizeSchedule([{ days: ['someday'], start: '17:00', end: '17:30' }], 'x', { strict: true }), /days must be/);
+  assert.throws(() => normalizeSchedule([{ days: 'daily', start: '5pm', end: '17:30' }], 'x', { strict: true }), /HH:MM/);
+  const s = normalizeStation({
+    id: 'news', name: 'News 5', url: 'https://x.example/',
+    schedule: [{ days: 'weekdays', start: '17:00', end: '17:30', title: 'News at 5' }, { days: ['Saturday'], start: '23:30', end: '00:05', title: 'Late news' }],
+  });
+  assert.deepEqual(s.schedule[0].days, ['mon', 'tue', 'wed', 'thu', 'fri']);
+  assert.deepEqual(s.schedule[1].days, ['sat']);
+  // Wednesday 2026-10-28 12:00 in Denver (18:00 UTC, MDT is UTC-6); the guide covers two days.
+  const now = Date.UTC(2026, 9, 28, 18, 0);
+  const xml = buildXmltv([s], { now, hours: 96, timeZone: 'America/Denver' });
+  // 17:00 MDT = 23:00 UTC on the 28th; 17:00 MST (after the DST change on Nov 1) would be 00:00 UTC.
+  assert.match(xml, /start="20261028230000 \+0000" stop="20261028233000 \+0000" channel="news">\n    <title lang="en">News at 5</);
+  // Saturday 23:30-00:05 MDT runs past midnight: 05:30-06:05 UTC on Sunday.
+  assert.match(xml, /start="20261101053000 \+0000" stop="20261101060500 \+0000" channel="news">\n    <title lang="en">Late news</);
+  assert.match(xml, /<title lang="en">Not streaming<\/title>/);
+  assert.doesNotMatch(xml, /Live: News 5/);
+  // Days after the DST change: 17:00 MST is midnight UTC.
+  const later = buildXmltv([s], { now: Date.UTC(2026, 10, 2, 18, 0), hours: 24, timeZone: 'America/Denver' });
+  assert.match(later, /start="20261103000000 \+0000" stop="20261103003000 \+0000"/);
+  // A station without a schedule keeps its hour-long "Live" blocks.
+  assert.match(buildXmltv([normalizeStation({ id: 'plain', name: 'Plain', url: 'https://x.example/' })], { now, hours: 2 }), /Live: Plain/);
+});
+
+test('newscast schedules: a local game on the station replaces the newscast it overlaps', async () => {
+  const { normalizeStation } = await import('../src/stations.js');
+  const { buildXmltv } = await import('../src/guide.js');
+  const s = normalizeStation({ id: 'news', name: 'News 5', url: 'https://x.example/', schedule: [{ days: 'daily', start: '17:00', end: '17:30', title: 'News at 5' }] });
+  const now = Date.UTC(2026, 9, 28, 18, 0);
+  const game = { station: s, event: { start: Date.UTC(2026, 9, 28, 22, 0), end: Date.UTC(2026, 9, 29, 1, 0), title: 'Big Game', team: 'Home Team' } };
+  const xml = buildXmltv([s], { now, hours: 12, timeZone: 'America/Denver', games: [game] });
+  assert.match(xml, /Big Game/);
+  assert.doesNotMatch(xml, /start="20261028230000 \+0000"[^>]*>\n    <title lang="en">News at 5/);
+});
+
+test('newscast times: DST gaps land after the gap, games cut newscasts, bad blocks and zones don\'t break anything', async () => {
+  const { normalizeStation, normalizeSchedule } = await import('../src/stations.js');
+  const { buildXmltv, zonedTime } = await import('../src/guide.js');
+  // 2027-03-14 02:30 doesn't exist in Denver: 03:30 MDT (09:30 UTC). 2026-11-01 01:30 happens twice: the first (07:30 UTC).
+  assert.equal(new Date(zonedTime(2027, 2, 14, 2, 30, 'America/Denver')).toISOString(), '2027-03-14T09:30:00.000Z');
+  assert.equal(new Date(zonedTime(2027, 2, 14, 1, 30, 'America/Denver')).toISOString(), '2027-03-14T08:30:00.000Z');
+  assert.equal(new Date(zonedTime(2026, 10, 1, 1, 30, 'America/Denver')).toISOString(), '2026-11-01T07:30:00.000Z');
+  assert.equal(new Date(zonedTime(2026, 6, 4, 17, 0, 'America/Denver')).toISOString(), '2026-07-04T23:00:00.000Z');
+
+  // A newscast entirely inside the gap (02:30-03:30) keeps its hour: 03:30-04:30 MDT.
+  const early = normalizeStation({ id: 'early', name: 'Early', url: 'https://x.example/', schedule: [{ days: ['sun'], start: '02:30', end: '03:30', title: 'Overnight' }] });
+  assert.match(buildXmltv([early], { now: Date.UTC(2027, 2, 14, 6), hours: 6, timeZone: 'America/Denver' }), /start="20270314093000 \+0000" stop="20270314103000 \+0000" channel="early">\n    <title lang="en">Overnight/);
+
+  // A game at 17:15 cuts a 17:00-18:00 newscast to 17:00-17:15.
+  const s = normalizeStation({ id: 'news', name: 'News', url: 'https://x.example/', schedule: [{ days: 'daily', start: '17:00', end: '18:00', title: 'News hour' }] });
+  const game = { station: s, event: { start: Date.UTC(2026, 9, 28, 23, 15), end: Date.UTC(2026, 9, 29, 2, 0), title: 'Game', team: 'Team' } };
+  const xml = buildXmltv([s], { now: Date.UTC(2026, 9, 28, 18), hours: 12, timeZone: 'America/Denver', games: [game] });
+  assert.match(xml, /start="20261028230000 \+0000" stop="20261028231500 \+0000" channel="news">\n    <title lang="en">News hour/);
+
+  // One bad block is dropped, not the whole station; a market file is checked strictly.
+  assert.equal(normalizeStation({ id: 'x', url: 'https://x.example/', schedule: [{ days: 'daily', start: '6:00', end: '07:00' }, { days: 'daily', start: '18:00', end: '18:30' }] }).schedule.length, 1);
+  assert.throws(() => normalizeSchedule([{ days: 'daily', start: '6:00', end: '07:00' }], 'x', { strict: true }), /HH:MM/);
+
+  // A station without a schedule never touches the time zone, so an unknown one can't break the guide.
+  assert.match(buildXmltv([normalizeStation({ id: 'plain', name: 'Plain', url: 'https://x.example/' })], { hours: 2, timeZone: 'Not/AZone' }), /Live: Plain/);
+});
+
+test('bundled market: logos for every station, and schedules that pass the strict check', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { normalizeSchedule } = await import('../src/stations.js');
+  const m = JSON.parse(await readFile(new URL('../markets/denver.json', import.meta.url), 'utf8'));
+  for (const s of m.stations) {
+    assert.match(s.logo || '', /^https:\/\//, `${s.id} logo`);
+    assert.equal(normalizeSchedule(s.schedule, s.id, { strict: true }).length, (s.schedule || []).length);
+  }
+  assert.ok(m.stations.find(s => s.id === 'koat').schedule.length > 0);
+});
