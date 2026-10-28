@@ -2,6 +2,14 @@
   {
     "versions": [
       {
+        "version": "1.0.9.0",
+        "changelog": "Station logos in Live TV and the guide for all 30 bundled stations. Stations that stream only during newscasts (KOAT, KGWN) list their newscasts in the guide at their times, with \"Not streaming\" between them. Stations set up by an earlier version get their logos and newscast times automatically.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/baverrr/media-scraper/releases/download/v1.0.9/local-broadcast_1.0.9.0.zip",
+        "checksum": "8ff44e10b4926bdc719c920c2afcc95f",
+        "timestamp": "2026-10-28T00:26:58Z"
+      },
+      {
         "version": "1.0.8.0",
         "changelog": "Keep streams ready fixes: the background warm-up runs one station at a time and always leaves room for someone tuning in or a local game; stations whose stream links expire within minutes are renewed at most every 10 minutes; a station edited while it was being warmed is tried with its new settings right away; turning the setting on or off no longer refreshes the guide. Signed-in stations check only the page itself (not embedded widgets) for a sign-in prompt before signing in again.",
         "targetAbi": "12.2.0.0",
