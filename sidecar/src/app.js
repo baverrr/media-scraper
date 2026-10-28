@@ -17,6 +17,14 @@ export const SLATE_SECONDS = 6;
 const SLATE_PATH = new URL('../assets/slate.ts', import.meta.url);
 const SPORTS_LOGO_PATH = new URL('../assets/local-sports.png', import.meta.url);
 
+// Station logos are fetched by the sidecar and kept, not by Jellyfin: Wikimedia, where many come
+// from, refuses downloads whose User-Agent doesn't say what's asking and how to reach its maker
+// (https://w.wiki/4wJS), and Jellyfin's don't.
+const LOGO_USER_AGENT = 'local-broadcast-sidecar (https://github.com/baverrr/media-scraper)';
+const LOGO_TTL_MS = 7 * 86_400_000;
+const LOGO_RETRY_MS = 3_600_000;
+const LOGO_MAX_BYTES = 2_000_000;
+
 // A live playlist that repeats the slate. The sequence follows the clock, so every reload moves on
 // by the segments that have played; each repeat's timestamps carry on from the last (slate.js).
 export const slatePlaylist = (now, segmentUrl) => loopPlaylist(now, SLATE_SECONDS, segmentUrl);
@@ -423,6 +431,46 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
   const slateClips = () => (slate ??= [readFileSync(config.slatePath || SLATE_PATH)]);
   let sportsLogo;
 
+  // id -> { src, body, type, until }: a station's logo as last fetched, and when to fetch it again.
+  const logos = new Map();
+  const logoFetches = new Map(); // id -> the fetch in progress
+  async function fetchLogo(src) {
+    let res;
+    try {
+      res = await fetchImpl(src, { headers: { 'user-agent': LOGO_USER_AGENT, accept: 'image/*' }, redirect: 'follow', signal: AbortSignal.timeout(15_000) });
+    } catch (e) {
+      throw new HttpError(502, `logo unreachable: ${e.message}`);
+    }
+    if (!res.ok) throw new HttpError(502, `logo HTTP ${res.status}`);
+    const type = (res.headers.get('content-type') || '').split(';')[0].trim();
+    if (!type.startsWith('image/')) throw new HttpError(502, `logo is ${type || 'not an image'}`);
+    const body = Buffer.from(await res.arrayBuffer());
+    if (body.length > LOGO_MAX_BYTES) throw new HttpError(502, 'logo is too large');
+    return { body, type };
+  }
+  // The station's logo, fetched when not kept or due again; a failed refresh keeps the old one.
+  async function stationLogo(station) {
+    const src = station.logo;
+    const kept = logos.get(station.id);
+    if (kept?.src === src && kept.until > now()) return kept;
+    let pending = logoFetches.get(station.id);
+    if (!pending || pending.src !== src) {
+      pending = fetchLogo(src).then(
+        got => { const v = { src, ...got, until: now() + LOGO_TTL_MS }; logos.set(station.id, v); return v; },
+        e => {
+          const old = logos.get(station.id);
+          if (old?.src !== src) throw e;
+          log.warn?.(`[${station.id}] logo refresh failed, keeping the last one: ${e.message}`);
+          old.until = now() + LOGO_RETRY_MS;
+          return old;
+        },
+      ).finally(() => { if (logoFetches.get(station.id) === pending) logoFetches.delete(station.id); });
+      pending.src = src;
+      logoFetches.set(station.id, pending);
+    }
+    return pending;
+  }
+
   async function servePlaylist(req, res, station, which) {
     let pl;
     try {
@@ -502,12 +550,19 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=86400' });
       return res.end(sportsLogo ??= readFileSync(SPORTS_LOGO_PATH));
     }
+    if ((m = p.match(/^\/logo\/([^/]+)$/)) && method === 'GET') {
+      const station = store.get(decodeURIComponent(m[1]));
+      if (!station?.logo) throw new HttpError(404, 'no logo for that station');
+      const logo = await stationLogo(station);
+      res.writeHead(200, { 'content-type': logo.type, 'cache-control': 'max-age=86400' });
+      return res.end(logo.body);
+    }
     if (method === 'GET' && p === '/playlist.m3u') return send(res, 200, buildM3u(await orderedStations(), baseUrl(req)), 'audio/x-mpegurl');
     if (method === 'GET' && p === '/guide.xml') {
       const hours = Math.min(Math.max(Number(url.searchParams.get('hours')) || 168, 1), 336);
       const { games } = await sportsState(hours);
       const channels = [...(sportsOn() ? [sportsChannel(store.sports)] : []), ...store.enabled()];
-      return send(res, 200, buildXmltv(channels, { hours, games, now: now(), timeZone: guideTimeZone() }), 'application/xml');
+      return send(res, 200, buildXmltv(channels, { hours, games, now: now(), timeZone: guideTimeZone(), baseUrl: baseUrl(req) }), 'application/xml');
     }
 
     // Local Sports: the station airing a local game right now (the earliest-started one), or the

@@ -410,6 +410,56 @@ test('keep ready: stations are resolved ahead of time, and one with nothing to p
   assert.equal(calls.filter(c => c === 'ready').length, 1); // still fresh (30-minute TTL)
 });
 
+test('station logos: fetched by the sidecar with its own User-Agent, kept, and kept through a failed refresh', async () => {
+  const marketsDir = path.join(dataDir, 'markets');
+  const store = new StationStore({ dataDir: path.join(dataDir, 'logo-data'), marketsDir, market: 'test' });
+  await store.load();
+  await store.save([
+    { id: 'wiki', url: 'https://station.example/a', logo: 'https://upload.example/a.png' },
+    { id: 'html', url: 'https://station.example/b', logo: 'https://upload.example/page.html' },
+    { id: 'none', url: 'https://station.example/c' },
+  ]);
+  const fetched = [];
+  let up = true;
+  const fetchImpl = async (url, opts) => {
+    fetched.push({ url, ua: opts.headers['user-agent'] });
+    if (!up) throw new TypeError('fetch failed');
+    if (url.endsWith('.html')) return new Response('<html>', { headers: { 'content-type': 'text/html' } });
+    return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'content-type': 'image/png' } });
+  };
+  let t = 1_800_000_000_000;
+  const local = createApp({ store, resolver: {}, config: {}, log: {}, fetchImpl, now: () => t });
+  const server = http.createServer(local.handler);
+  const base = await listen(server);
+  try {
+    const m3u = await (await fetch(`${base}/playlist.m3u`)).text();
+    assert.match(m3u, new RegExp(`tvg-id="wiki"[^\\n]*tvg-logo="${base}/logo/wiki"`));
+    assert.doesNotMatch(m3u, /tvg-id="none"[^\n]*tvg-logo/);
+    assert.match(await (await fetch(`${base}/guide.xml?hours=1`)).text(), new RegExp(`<icon src="${base}/logo/wiki" />`));
+
+    const first = await fetch(`${base}/logo/wiki`);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('content-type'), 'image/png');
+    assert.equal((await first.arrayBuffer()).byteLength, 4);
+    assert.match(fetched[0].ua, /^local-broadcast-sidecar \(https:\/\//); // says what it is and where its maker is
+    await fetch(`${base}/logo/wiki`);
+    assert.equal(fetched.length, 1); // kept
+
+    assert.equal((await fetch(`${base}/logo/html`)).status, 502); // not an image
+    assert.equal((await fetch(`${base}/logo/none`)).status, 404);
+
+    // A week later the source is down: the kept logo is still served, and not asked for again at once.
+    t += 8 * 86_400_000;
+    up = false;
+    const n = fetched.length;
+    assert.equal((await fetch(`${base}/logo/wiki`)).status, 200);
+    await fetch(`${base}/logo/wiki`);
+    assert.equal(fetched.length, n + 1);
+  } finally {
+    server.close();
+  }
+});
+
 test('keep ready: a station that streams only for newscasts is tried at the newscast, not after its backoff', async () => {
   const marketsDir = path.join(dataDir, 'markets');
   const store = new StationStore({ dataDir: path.join(dataDir, 'warm-news-data'), marketsDir, market: 'test' });

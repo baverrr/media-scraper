@@ -13,7 +13,7 @@ const stations = [
 test('M3U lists each station with tvg tags and a sidecar stream URL', () => {
   const m3u = buildM3u(stations, 'http://127.0.0.1:8899');
   assert.match(m3u, /^#EXTM3U\n/);
-  assert.match(m3u, /tvg-id="kusa" tvg-name="9NEWS \(KUSA\)" tvg-chno="9.1" tvg-logo="https:\/\/x\/l.png"/);
+  assert.match(m3u, /tvg-id="kusa" tvg-name="9NEWS \(KUSA\)" tvg-chno="9.1" tvg-logo="http:\/\/127\.0\.0\.1:8899\/logo\/kusa"/); // served by the sidecar
   assert.match(m3u, /\nhttp:\/\/127\.0\.0\.1:8899\/stream\/kusa\.m3u8\n/);
   assert.doesNotMatch(m3u, /tvg-name="FOX31 "Denver/); // quotes stripped from attributes
   assert.doesNotMatch(m3u, /tvg-id="kdvr"[^\n]*tvg-logo/); // no logo, none listed

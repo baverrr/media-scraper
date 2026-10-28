@@ -1,7 +1,7 @@
 ---
 name: "Local Broadcast"
 guid: "d0766040-c26a-4cc7-9c0b-c7064aa77001"
-version: "1.1.2.0"
+version: "1.1.3.0"
 targetAbi: "12.2.0.0"
 framework: "net10.0"
 overview: "Local TV stations' free web streams in Live TV, local sports first"
@@ -17,7 +17,7 @@ imageUrl: "https://raw.githubusercontent.com/baverrr/media-scraper/main/docs/ico
 artifacts:
 - "Jellyfin.Plugin.LocalBroadcast.dll"
 changelog: >
-  Stations that stream only during their newscasts are kept ready for them:
-  a failed try is retried at the next newscast's start at the latest, and
-  every 2 minutes during one, instead of up to an hour later. Local Sports
-  now has a logo.
+  Station logos come from the sidecar: it fetches each one itself, with a
+  User-Agent that Wikimedia accepts, and keeps it for a week. Jellyfin's own
+  downloads were refused by Wikimedia, so CW2, 9NEWS, FOX21, FOX31 and
+  Estrella TV showed no logo.

@@ -28,6 +28,13 @@ export function sportsChannel(sports) {
   return { id: SPORTS_ID, name: 'Local Sports', callSign: '', channel: sports?.channel || '1.1', network: 'Sports', logo: null };
 }
 
+// Where Jellyfin gets a channel's logo: from the sidecar, which fetches station logos itself (some
+// hosts, Wikimedia among them, refuse Jellyfin's image downloads) and has Local Sports' own.
+export function logoUrl(station, baseUrl) {
+  if (station.id === SPORTS_ID) return `${baseUrl}/logo/${SPORTS_ID}.png`;
+  return station.logo ? `${baseUrl}/logo/${encodeURIComponent(station.id)}` : null;
+}
+
 export function buildM3u(stations, baseUrl, group = 'Local Broadcast') {
   const lines = ['#EXTM3U'];
   for (const s of stations) {
@@ -35,8 +42,7 @@ export function buildM3u(stations, baseUrl, group = 'Local Broadcast') {
       `tvg-id="${attr(s.id)}"`,
       `tvg-name="${attr(displayName(s))}"`,
       s.channel ? `tvg-chno="${attr(s.channel)}"` : null,
-      // Local Sports' logo is the sidecar's own (assets/local-sports.svg).
-      s.logo || s.id === SPORTS_ID ? `tvg-logo="${attr(s.logo || `${baseUrl}/logo/${SPORTS_ID}.png`)}"` : null,
+      logoUrl(s, baseUrl) ? `tvg-logo="${attr(logoUrl(s, baseUrl))}"` : null,
       `group-title="${attr(s.id === SPORTS_ID ? 'Local Sports' : group)}"`,
     ].filter(Boolean);
     lines.push(`#EXTINF:-1 ${tags.join(' ')},${attr(displayName(s))}`);
@@ -166,7 +172,7 @@ function without(slots, taken) {
 // replace the blocks on their station and fill the Local Sports channel when it's in the list.
 // A station with a newscast schedule shows its newscasts at their times, and "Not streaming" between
 // them (in `timeZone`, the market's).
-export function buildXmltv(stations, { now = Date.now(), hours = 48, blockMinutes = 60, games = [], timeZone } = {}) {
+export function buildXmltv(stations, { now = Date.now(), hours = 48, blockMinutes = 60, games = [], timeZone, baseUrl } = {}) {
   const block = blockMinutes * 60_000;
   const start = Math.floor(now / block) * block - block;
   const end = now + hours * 3_600_000;
@@ -175,7 +181,8 @@ export function buildXmltv(stations, { now = Date.now(), hours = 48, blockMinute
     out.push(`  <channel id="${xml(s.id)}">`);
     out.push(`    <display-name>${xml(displayName(s))}</display-name>`);
     if (s.channel) out.push(`    <display-name>${xml(s.channel)}</display-name>`);
-    if (s.logo) out.push(`    <icon src="${xml(s.logo)}" />`);
+    const logo = baseUrl ? logoUrl(s, baseUrl) : s.logo;
+    if (logo) out.push(`    <icon src="${xml(logo)}" />`);
     out.push('  </channel>');
   }
   const inWindow = games.filter(g => g.event.end > start && g.event.start < end);
