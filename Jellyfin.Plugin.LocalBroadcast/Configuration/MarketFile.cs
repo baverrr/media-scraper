@@ -49,7 +49,7 @@ public static partial class MarketFile
         }
         catch (JsonException e)
         {
-            return "The market file isn't valid JSON: " + e.Message;
+            return JsonProblem(e);
         }
 
         if (string.IsNullOrWhiteSpace(parsed.Name))
@@ -154,6 +154,40 @@ public static partial class MarketFile
 
     private static readonly string[] DayNames = ["sun", "mon", "tue", "wed", "thu", "fri", "sat", "daily", "weekdays", "weekends"];
 
+    // A parse error in plain words: where it is, and for a value of the wrong kind (a list where
+    // text belongs, say) what belongs there, instead of the serializer's .NET type names.
+    private static string JsonProblem(JsonException e)
+    {
+        var where = e.LineNumber is { } line ? $" (line {line + 1}, column {(e.BytePositionInLine ?? 0) + 1})" : string.Empty;
+        var path = e.Path is null or "$" ? null : e.Path.StartsWith("$.", StringComparison.Ordinal) ? e.Path[2..] : e.Path;
+        var wrongKind = WrongKind().Match(e.Message);
+        if (wrongKind.Success)
+        {
+            var field = path is null ? "The market file" : $"\"{path}\"";
+            return $"{field} should be {Kind(wrongKind.Groups[1].Value)}{where}.";
+        }
+
+        // System.Text.Json ends its messages with " Path: $ | LineNumber: 0 | BytePositionInLine: 0.".
+        var message = e.Message;
+        var cut = message.IndexOf(" Path: ", StringComparison.Ordinal);
+        if (cut >= 0)
+        {
+            message = message[..cut];
+        }
+
+        return $"The market file isn't valid JSON{where}: {message.TrimEnd('.')}.";
+    }
+
+    private static string Kind(string type) => type switch
+    {
+        "System.String" => "text in quotes",
+        "System.Boolean" => "true or false",
+        "System.Int32" or "System.Int64" or "System.Double" or "System.Decimal" or "System.Single" => "a number",
+        _ when type.StartsWith("System.Nullable`1[", StringComparison.Ordinal) => Kind(type[18..^1]),
+        _ when type.StartsWith("System.Collections.Generic.", StringComparison.Ordinal) || type.EndsWith("[]", StringComparison.Ordinal) => "a list in [ ]",
+        _ => "an object in { }",
+    };
+
     private static bool IsHttpUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var url) && (url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps);
 
@@ -172,6 +206,9 @@ public static partial class MarketFile
 
     [GeneratedRegex("^[a-z0-9][a-z0-9_-]{0,63}$")]
     private static partial Regex StationId();
+
+    [GeneratedRegex("could not be converted to (\\S+?)\\. Path:")]
+    private static partial Regex WrongKind();
 
     [GeneratedRegex("[^a-z0-9]+")]
     private static partial Regex NotIdChars();

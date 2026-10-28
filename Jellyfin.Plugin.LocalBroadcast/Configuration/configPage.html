@@ -510,6 +510,7 @@
                         check.setAttribute('aria-label', 'Use ' + m.name);
                         check.style.cssText = 'width:1.3em;height:1.3em;margin:0 1em 0 .5em;';
                         check.addEventListener('change', function () {
+                            marketStatus('', null);
                             var now = selectedMarkets().filter(function (x) { return x !== m.id; });
                             if (check.checked) now.push(m.id);
                             if (!now.length) { check.checked = true; marketStatus('Keep at least one market ticked.', false); return; }
@@ -519,6 +520,7 @@
                         r.row.insertBefore(check, r.row.firstChild);
                         if (ticked && ids[0] !== m.id) {
                             r.row.appendChild(iconButton('star', 'Make this the main market', function () {
+                                marketStatus('', null);
                                 setMarkets([m.id].concat(selectedMarkets().filter(function (x) { return x !== m.id; })));
                                 save().then(function () { renderMarkets(); loadCenter(); });
                             }));
@@ -541,6 +543,7 @@
                             a.textContent = 'show ' + m.name;
                             a.addEventListener('click', function (e) {
                                 e.preventDefault();
+                                marketStatus('', null);
                                 config.HiddenMarkets = config.HiddenMarkets.filter(function (x) { return x !== m.id; });
                                 save().then(renderMarkets);
                             });
@@ -551,6 +554,7 @@
                 }
 
                 function removeMarket(m) {
+                    marketStatus('', null);
                     var rest = selectedMarkets().filter(function (x) { return x !== m.id; });
                     if (!rest.length) { Dashboard.alert('This is your only ticked market. Tick another one first.'); return; }
                     if (m.custom) {
@@ -576,6 +580,7 @@
                 }
 
                 function exportMarket(m) {
+                    marketStatus('', null);
                     ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('LocalBroadcast/Markets/' + encodeURIComponent(m.id) + '/Export'), dataType: 'text' })
                         .then(function (text) { download(m.id + '.json', text); }, function () { marketStatus('Could not export ' + m.name + '.', false); });
                 }
@@ -822,6 +827,7 @@
                     var ids = selectedMarkets();
                     var names = ids.map(function (id) { var m = markets.find(function (x) { return x.id === id; }); return m ? m.name : id; });
                     if (!confirm('Replace your stations and teams with those of ' + names.join(' + ') + '?')) return;
+                    marketStatus('', null);
                     api('GET', 'Markets/Combined?ids=' + encodeURIComponent(ids.join(','))).then(function (m) {
                         setMarkets(ids);
                         config.Stations = m.Stations || m.stations || [];
