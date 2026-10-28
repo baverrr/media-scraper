@@ -2,6 +2,14 @@
   {
     "versions": [
       {
+        "version": "1.1.3.0",
+        "changelog": "Station logos come from the sidecar: it fetches each one itself, with a User-Agent that Wikimedia accepts, and keeps it for a week. Jellyfin's own downloads were refused by Wikimedia, so CW2, 9NEWS, FOX21, FOX31 and Estrella TV showed no logo.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/baverrr/media-scraper/releases/download/v1.1.3/local-broadcast_1.1.3.0.zip",
+        "checksum": "29b77e45c9facb1788b46db5a173b7c7",
+        "timestamp": "2026-10-28T04:52:56Z"
+      },
+      {
         "version": "1.1.2.0",
         "changelog": "Stations that stream only during their newscasts are kept ready for them: a failed try is retried at the next newscast's start at the latest, and every 2 minutes during one, instead of up to an hour later. Local Sports now has a logo.",
         "targetAbi": "12.2.0.0",
