@@ -2,6 +2,14 @@
   {
     "versions": [
       {
+        "version": "1.1.1.0",
+        "changelog": "Market files: an import in the wrong layout now says which field is wrong and what belongs there, instead of \"isn't valid JSON\" and .NET type names. A market message no longer stays on screen after your next market action.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/baverrr/media-scraper/releases/download/v1.1.1/local-broadcast_1.1.1.0.zip",
+        "checksum": "d080166026921449b125bc9f9f0ded8b",
+        "timestamp": "2026-10-28T03:39:54Z"
+      },
+      {
         "version": "1.1.0.0",
         "changelog": "Markets: tick several markets and load them together (a station in more than one appears once; the main market sets the coverage center and the time zone for newscast times). Save your current stations and teams as a market of your own, import or export market files, delete your own markets and hide bundled ones.",
         "targetAbi": "12.2.0.0",
