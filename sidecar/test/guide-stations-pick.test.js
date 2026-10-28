@@ -16,6 +16,10 @@ test('M3U lists each station with tvg tags and a sidecar stream URL', () => {
   assert.match(m3u, /tvg-id="kusa" tvg-name="9NEWS \(KUSA\)" tvg-chno="9.1" tvg-logo="https:\/\/x\/l.png"/);
   assert.match(m3u, /\nhttp:\/\/127\.0\.0\.1:8899\/stream\/kusa\.m3u8\n/);
   assert.doesNotMatch(m3u, /tvg-name="FOX31 "Denver/); // quotes stripped from attributes
+  assert.doesNotMatch(m3u, /tvg-id="kdvr"[^\n]*tvg-logo/); // no logo, none listed
+  // Local Sports has the sidecar's own logo.
+  const sports = buildM3u([{ id: 'local-sports', name: 'Local Sports', channel: '1.1', logo: null }], 'http://127.0.0.1:8899');
+  assert.match(sports, /tvg-logo="http:\/\/127\.0\.0\.1:8899\/logo\/local-sports\.png"/);
 });
 
 test('XMLTV has a channel per station and hour blocks covering now', () => {

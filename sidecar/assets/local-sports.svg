@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300" width="600" height="300">
+  <title>Local Sports</title>
+  <!-- The Local Sports channel's logo (local-sports.png is this, rendered with rsvg-convert). -->
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101a33"/>
+      <stop offset="1" stop-color="#2a1252"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="40" width="580" height="220" rx="36" fill="url(#badge)"/>
+  <rect x="10" y="40" width="580" height="220" rx="36" fill="none" stroke="#00a4dc" stroke-width="6"/>
+  <!-- A ball with seams, on the left. -->
+  <g transform="translate(130 150)">
+    <circle r="78" fill="#00a4dc"/>
+    <path d="M-78 0 H78 M0 -78 V78" stroke="#101a33" stroke-width="8"/>
+    <path d="M-55 -55 Q-18 0 -55 55 M55 -55 Q18 0 55 55" fill="none" stroke="#101a33" stroke-width="8"/>
+  </g>
+  <g font-family="DejaVu Sans, Arial, sans-serif" font-weight="bold" fill="#ffffff">
+    <text x="236" y="136" font-size="54" letter-spacing="10">LOCAL</text>
+    <text x="232" y="212" font-size="74" letter-spacing="2">SPORTS</text>
+  </g>
+</svg>

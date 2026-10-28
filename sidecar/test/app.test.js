@@ -84,6 +84,13 @@ test('playlist and guide list enabled stations only', async () => {
   assert.match(xml, /<channel id="test">/);
 });
 
+test('the Local Sports logo is served as a PNG', async () => {
+  const res = await fetch(`${sideUrl}/logo/local-sports.png`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  assert.deepEqual([...new Uint8Array(await res.arrayBuffer()).slice(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+});
+
 test('stream: master reduced to one variant behind stable URLs, segments proxied with headers', async () => {
   const master = await (await fetch(`${sideUrl}/stream/test.m3u8`)).text();
   assert.match(master, /RESOLUTION=1280x720/);
@@ -401,6 +408,27 @@ test('keep ready: stations are resolved ahead of time, and one with nothing to p
   await local.warmStations();
   assert.deepEqual(calls.filter(c => c === 'offair').length, 3);
   assert.equal(calls.filter(c => c === 'ready').length, 1); // still fresh (30-minute TTL)
+});
+
+test('keep ready: a station that streams only for newscasts is tried at the newscast, not after its backoff', async () => {
+  const marketsDir = path.join(dataDir, 'markets');
+  const store = new StationStore({ dataDir: path.join(dataDir, 'warm-news-data'), marketsDir, market: 'test' });
+  await store.load();
+  // t is 08:00 UTC; the newscast is 08:20 to 08:50.
+  await store.save([{ id: 'news', url: 'https://station.example/news', keepReady: true, schedule: [{ days: 'daily', start: '08:20', end: '08:50' }] }]);
+  const calls = [];
+  const resolver = { async resolve(station) { calls.push(station.id); throw Object.assign(new Error('No live stream found on the page'), { details: {} }); } };
+  let t = Date.UTC(2027, 0, 15, 8, 0);
+  const local = createApp({ store, resolver, config: { failureSeconds: 0, timezone: 'UTC' }, log: {}, now: () => t });
+  const tryAt = async minute => { t = Date.UTC(2027, 0, 15, 8, minute); await local.warmStations(); return calls.length; };
+  assert.equal(await tryAt(0), 1); // fails: 5 minutes
+  assert.equal(await tryAt(4), 1);
+  assert.equal(await tryAt(5), 2); // fails: 10 minutes
+  assert.equal(await tryAt(15), 3); // fails: 20 minutes would be 08:35, but the newscast starts at 08:20
+  assert.equal(await tryAt(19), 3);
+  assert.equal(await tryAt(20), 4); // fails during the newscast: every 2 minutes
+  assert.equal(await tryAt(21), 4);
+  assert.equal(await tryAt(22), 5);
 });
 
 test('priority semaphore: a queued job can be moved up', async () => {
