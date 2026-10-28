@@ -156,6 +156,25 @@ public class CoverageTests
     }
 
     [Fact]
+    public void ExplainsMarketFileJsonProblemsInPlainWords()
+    {
+        // Valid JSON in the wrong layout names the field and what belongs there, not .NET types.
+        var stations = MarketFile.Check("""{"name":"broken","stations":"nope"}""", out _)!;
+        Assert.Equal("\"stations\" should be a list in [ ] (line 1, column 35).", stations);
+        Assert.DoesNotContain("System.", stations);
+        Assert.DoesNotContain("valid JSON", stations);
+        Assert.Equal("\"name\" should be text in quotes (line 1, column 10).", MarketFile.Check("""{"name":5,"stations":[]}""", out _));
+        Assert.StartsWith("\"stations[0]\" should be an object in { }", MarketFile.Check("""{"name":"X","stations":["a"]}""", out _));
+        Assert.StartsWith("The market file should be an object in { }", MarketFile.Check("[]", out _));
+
+        // Broken JSON says where, without the serializer's "Path: $ | LineNumber" tail.
+        var syntax = MarketFile.Check("{\n  \"name\": \"X\",,\n}", out _)!;
+        Assert.StartsWith("The market file isn't valid JSON (line 2, column ", syntax);
+        Assert.DoesNotContain("LineNumber", syntax);
+        Assert.DoesNotContain("Path:", syntax);
+    }
+
+    [Fact]
     public void ChecksMarketFilesAndPicksUniqueIds()
     {
         Assert.Contains("empty", MarketFile.Check("", out _));

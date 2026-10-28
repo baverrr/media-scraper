@@ -1,7 +1,7 @@
 ---
 name: "Local Broadcast"
 guid: "d0766040-c26a-4cc7-9c0b-c7064aa77001"
-version: "1.1.0.0"
+version: "1.1.1.0"
 targetAbi: "12.2.0.0"
 framework: "net10.0"
 overview: "Local TV stations' free web streams in Live TV, local sports first"
@@ -17,8 +17,6 @@ imageUrl: "https://raw.githubusercontent.com/baverrr/media-scraper/main/docs/ico
 artifacts:
 - "Jellyfin.Plugin.LocalBroadcast.dll"
 changelog: >
-  Markets: tick several markets and load them together (a station in more
-  than one appears once; the main market sets the coverage center and the
-  time zone for newscast times). Save your current stations and teams as a
-  market of your own, import or export market files, delete your own markets
-  and hide bundled ones.
+  Market files: an import in the wrong layout now says which field is wrong
+  and what belongs there, instead of "isn't valid JSON" and .NET type names.
+  A market message no longer stays on screen after your next market action.
