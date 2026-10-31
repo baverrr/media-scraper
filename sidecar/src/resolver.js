@@ -248,10 +248,12 @@ export class Resolver {
   // ({ username, password, session } plus callbacks that store the outcome; see app.js). A saved
   // session is tried first; when the page then has no stream, the session may have expired, so
   // the resolver signs in again once.
-  async resolve(station, login = null) {
+  // visit: for a station without a sign-in, the cookies and site storage from its last visit
+  // ({ state, save, forget }; see visits.js), so the page sees a returning visitor.
+  async resolve(station, login = null, visit = null) {
     if (station.streamUrl) return this.resolveManual(station);
     try {
-      return await this.resolvePage(station, login);
+      return await this.resolvePage(station, login, login ? null : visit);
     } catch (e) {
       // Only a page with no stream at all suggests the session expired; a bot check, DRM or a
       // failed sign-in wouldn't get better by signing in again.
@@ -268,23 +270,41 @@ export class Resolver {
     }
   }
 
-  async resolvePage(station, login) {
+  async resolvePage(station, login, visit = null) {
     if (!this.scraperSource) this.scraperSource = await readFile(this.scraperPath, 'utf8');
     const started = Date.now();
     const browser = await this.browser();
     const ua = await this.userAgent(browser);
-    const context = await browser.newContext({
+    const contextFor = storageState => browser.newContext({
       userAgent: ua,
       locale: 'en-US',
       ...(this.timezoneId ? { timezoneId: this.timezoneId } : {}),
       viewport: { width: 1280, height: 720 },
-      ...(login?.session ? { storageState: login.session } : {}),
+      ...(storageState ? { storageState } : {}),
     });
+    // A saved visit the browser won't take (from another Playwright version, say) is dropped
+    // rather than failing the station until it expires. (A station with a sign-in never gets a visit.)
+    const context = visit?.state
+      ? await contextFor(visit.state).catch(async e => {
+        this.log.warn?.(`[${station.id}] the saved visit can't be used (${e.message.split('\n')[0]}); starting a new one`);
+        await this.dropVisit(station, visit);
+        return contextFor(null);
+      })
+      : await contextFor(login?.session);
     const found = [];
     const embeds = [];
-    // Keeps the session's renewed cookies once a stream was found with it.
+    // The cookies and site storage the page ended with, for the station's next visit. A context
+    // that's already closed has nothing to keep; a visit that can't be saved is logged.
+    const keepVisit = async () => {
+      let state;
+      try { state = await context.storageState(); } catch { return; }
+      try { await visit.save(state); } catch (e) { this.log.warn?.(`[${station.id}] couldn't keep the visit for next time: ${e.message}`); }
+    };
+    // Once a stream was found: keeps the session's renewed cookies, or the visit's for a station
+    // without a sign-in.
     const finish = async result => {
       if (login) await context.storageState().then(state => login.saveSession(state)).catch(() => {});
+      else if (visit) await keepVisit();
       return result;
     };
     try {
@@ -358,7 +378,7 @@ export class Resolver {
       const best = pickBest(candidates);
       if (best) {
         const url = best.probe.finalUrl || best.url;
-        return finish({
+        return await finish({
           url,
           type: best.type || (best.probe.dash ? 'dash' : 'hls'),
           headers: best.headers,
@@ -372,13 +392,16 @@ export class Resolver {
       for (const e of embeds) {
         if (!this.ytDlp || !EMBED_PROVIDERS.test(e.provider || '')) continue;
         const viaYtDlp = await this.fromYtDlp(e.url).catch(() => null);
-        if (viaYtDlp) return finish({ ...viaYtDlp, via: `yt-dlp (${e.provider})`, resolvedAt: Date.now(), tookMs: Date.now() - started });
+        if (viaYtDlp) return await finish({ ...viaYtDlp, via: `yt-dlp (${e.provider})`, resolvedAt: Date.now(), tookMs: Date.now() - started });
       }
 
       const drmOnly = candidates.length > 0 && candidates.some(c => c.probe?.drm) && !candidates.some(c => c.probe?.ok);
       const botCheck = !candidates.length && await this.showsBotCheck(page, response);
       // With a saved session: is the page asking to sign in (signed out), or just not streaming?
       const signedOut = !!login?.session && !drmOnly && !botCheck && await asksToSignIn(page);
+      // The page loaded, just without a stream: still a visit to come back as. After a bot check,
+      // the cookies may be what the site flagged.
+      if (visit) await (botCheck ? this.dropVisit(station, visit) : keepVisit());
       const message = drmOnly ? 'The station\'s stream is DRM-protected; Jellyfin can\'t play it'
         : botCheck ? 'The station\'s site shows a bot check instead of the page; the sidecar doesn\'t get around bot checks'
           : 'No live stream found on the page';
@@ -535,6 +558,10 @@ export class Resolver {
     } finally {
       await context.close().catch(() => {});
     }
+  }
+
+  async dropVisit(station, visit) {
+    try { await visit.forget(); } catch (e) { this.log.warn?.(`[${station.id}] couldn't forget the visit: ${e.message}`); }
   }
 
   // Only names the failure: a page answered with a challenge ("press and hold", a CAPTCHA) rather

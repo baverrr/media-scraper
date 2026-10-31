@@ -145,10 +145,17 @@ Whether a station works depends on how its website streams:
 | uses DRM (Widevine, FairPlay) | ❌ Jellyfin can't play DRM streams. |
 | streams only to signed-in (free) accounts | ⚠️ Works with a sign-in saved for the station, when the site's sign-in form is a plain one. See [Station sign-ins](#station-sign-ins). |
 | streams only in an app | ❌ No web stream to find. |
-| shows a bot check | ❌ The sidecar doesn't get around bot checks. |
+| shows a bot check | ❌ The sidecar doesn't get around bot checks, but it [makes them less likely](#bot-checks). |
 | plays another station's stream | Left off, so the same channel doesn't appear twice. |
 
 Each market file keeps the stations that don't work, turned off, with a note saying why; the settings page shows the note. To turn one on, paste a **stream URL** you're allowed to use into its settings: a `.m3u8` that doesn't expire, or a page yt-dlp supports, such as the station's YouTube live stream.
+
+### Bot checks
+
+Some station sites put a bot check ("press and hold", "verify you are human", a CAPTCHA) in front of their pages. The sidecar never solves a bot check or tries to get past one: the station fails with *bot check* until the site stops showing it. It does avoid the two habits that make a headless browser get them more often:
+
+- **It comes back as the same visitor.** For a station without a sign-in, the cookies and site storage its page ends with are kept for the next visit, so that visit isn't a first one, which is what bot checks target most. A page that answered with a bot check drops them. Stations with a [sign-in](#station-sign-ins) use their signed-in session instead. Visits unused for a month, and those of stations you remove, are deleted. `REMEMBER_VISITS=false` turns this off and deletes the visits kept.
+- **It leaves a site alone after a bot check**, instead of reloading the page every time a player retries: 15 minutes at first, doubling with each bot check in a row up to 6 hours, for every station on that site, signed-in ones too. Meanwhile the channel shows the "Nothing is streaming right now" screen, and **Test now** and the sidecar's log say how long is left. **Test now** tries the station once straight away, and a page that loads ends the wait.
 
 ## Markets
 
@@ -176,6 +183,7 @@ Missing your area? [CONTRIBUTING.md](CONTRIBUTING.md) shows the format and how t
 | `LOGIN_KEY` | generated | Encrypts saved station sign-ins (32 bytes: `openssl rand -base64 32`). The compose file reads it from `LOCAL_BROADCAST_LOGIN_KEY`. Unset, a key is generated in the data volume as `login.key`. |
 | `RESOLVE_TTL_MINUTES` | `30` | How long a found stream is reused (shorter when its token expires sooner). |
 | `MAX_CONCURRENT_RESOLVES` | `2` | Browser pages at once; local-sports stations jump the queue, and the background warm-up ("Keep streams ready") never takes the last one. |
+| `REMEMBER_VISITS` | `true` | Keep the cookies of stations without a sign-in between visits, which makes [bot checks](#bot-checks) less likely. `false` makes each of their visits a first one, and deletes the visits kept. |
 | `BROWSER_CHANNEL` | `chrome` | Google Chrome; empty uses the bundled Chromium (what ARM uses). Both play H.264/AAC. |
 | `PUBLIC_URL` | from the request | Base URL written into the M3U. |
 
@@ -201,7 +209,7 @@ docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet 
 docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
 ```
 
-The sidecar tests run `media-scraper.js` in a real browser (`sidecar/test/scraper.test.js`); they're skipped when Playwright has no browser installed.
+The sidecar tests run `media-scraper.js` and the resolver in a real browser (`sidecar/test/scraper.test.js`, the sign-in tests, and the resolver test in `visits.test.js`). `scraper.test.js` and `visits.test.js` skip theirs when Playwright has no browser installed.
 
 CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, and publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main). On a `vX.Y.Z` tag that matches `version` in `build.yaml`, it publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin catalog on GitHub Pages. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
 

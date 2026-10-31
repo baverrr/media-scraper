@@ -7,6 +7,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { buildM3u, buildXmltv, newscastSlots, sportsChannel, SPORTS_ID } from './guide.js';
 import { createSigner } from './sign.js';
 import { normalizeLogin } from './logins.js';
+import { SiteCooldown, siteOf } from './visits.js';
 import { isHls, isMaster, rewriteMaster, rewriteMedia, chosenVariantUrl, renditionUrls, proxyExtension } from './hls.js';
 import { loopPlaylist, loopSegment, offAirClips, OFF_AIR_SECONDS } from './slate.js';
 
@@ -203,7 +204,7 @@ export class ResolutionCache {
     const e = this.entries.get(id);
     if (!e) return { state: 'idle' };
     if (e.pending) return { state: 'resolving' };
-    if (e.error && !e.value) return { state: 'failed', error: e.error.message, retryAt: new Date(e.until).toISOString() };
+    if (e.error && !e.value) return { state: 'failed', error: e.error.message, retryAt: e.error.details?.retryAt || new Date(e.until).toISOString() };
     return {
       state: e.until > this.now() ? 'ready' : 'stale',
       via: e.value.via,
@@ -215,8 +216,9 @@ export class ResolutionCache {
   }
 }
 
-// logins: the LoginStore holding stations' sign-ins (optional).
-export function createApp({ store, resolver, sports = null, logins = null, config = {}, log = console, fetchImpl = fetch, now = Date.now }) {
+// logins: the LoginStore holding stations' sign-ins (optional); visitors: the VisitorStore keeping
+// other stations' cookies between visits (optional).
+export function createApp({ store, resolver, sports = null, logins = null, visitors = null, config = {}, log = console, fetchImpl = fetch, now = Date.now }) {
   const maxHeight = config.maxHeight ?? 1080;
   const apiKey = config.apiKey || '';
   const signer = createSigner();
@@ -257,8 +259,53 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
     };
   }
 
+  // A station's last visit, for one without a sign-in (its session plays that part).
+  function visitFor(station) {
+    if (!visitors || logins?.get(station.id)) return null;
+    return {
+      state: visitors.get(station.id),
+      save: state => visitors.save(station.id, state),
+      forget: () => visitors.forget(station.id),
+    };
+  }
+
+  // Signed in, a station's session takes the place of its visit; failing to forget it is only logged.
+  const forgetVisit = id => visitors?.forget(id).catch(e => log.warn?.(`[${id}] couldn't forget the visit: ${e.message}`));
+
+  // After a bot check, the site is left alone for a while instead of reloaded on every retry; a
+  // station with a manual stream URL doesn't open its page, so it never waits.
+  const cooldown = new SiteCooldown({ now });
+  const siteFor = station => (station.streamUrl ? null : siteOf(station.url));
+  function minutesTo(until) {
+    const n = Math.max(1, Math.ceil((until - now()) / 60_000));
+    return `${n} minute${n === 1 ? '' : 's'}`;
+  }
+  async function resolveStation(station) {
+    const site = siteFor(station);
+    const until = cooldown.waitingUntil(site, station.id);
+    if (until) {
+      throw Object.assign(new Error(`The station's site showed a bot check; leaving it alone for ${minutesTo(until)} more before trying again (Test now tries at once)`), {
+        details: { reason: 'bot-check', cooldown: true, retryAt: new Date(until).toISOString() },
+      });
+    }
+    try {
+      const r = await resolver.resolve(station, loginFor(station), visitFor(station));
+      cooldown.passed(site);
+      return r;
+    } catch (e) {
+      const reason = e?.details?.reason;
+      if (reason === 'bot-check' && site) {
+        const wait = cooldown.challenged(site);
+        e.message += `; trying the site again in ${minutesTo(wait)}`;
+        e.details.retryAt = new Date(wait).toISOString();
+        log.info?.(`[${station.id}] ${site} showed a bot check; leaving it alone for ${minutesTo(wait)}`);
+      } else if (reason === 'no-stream' || reason === 'drm') cooldown.passed(site); // the page itself loaded
+      throw e;
+    }
+  }
+
   const cache = new ResolutionCache({
-    resolve: station => resolver.resolve(station, loginFor(station)),
+    resolve: resolveStation,
     ttlMs: (config.ttlMinutes ?? 30) * 60_000,
     failureMs: (config.failureSeconds ?? 60) * 1000,
     concurrency: config.concurrency ?? 2,
@@ -625,6 +672,8 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       if (logins && saved.length) {
         for (const id of [...logins.entries.keys()]) if (!store.get(id)) await logins.remove(id);
       }
+      // So does its kept visit.
+      if (visitors && saved.length) await visitors.keepOnly(saved.map(s => s.id)).catch(e => log.warn?.(`visits: ${e.message}`));
       log.info?.(`stations updated: ${saved.length} (${saved.filter(s => s.enabled).length} enabled)`);
       return send(res, 200, saved);
     }
@@ -646,6 +695,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       if (method === 'PUT') {
         stationOr404(id, { requireEnabled: false });
         try { status = await logins.set(id, await readJson(req, 10_000)); } catch (e) { throw e instanceof HttpError ? e : new HttpError(400, e.message); }
+        await forgetVisit(id);
         lastSignIn.delete(id);
         log.info?.(`[${id}] sign-in saved`);
       } else {
@@ -678,6 +728,7 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       try {
         await logins.set(station.id, account);
         if (!r.confirmEmail) await logins.signedIn(station.id, r.session);
+        await forgetVisit(station.id);
       } catch (e) {
         log.warn?.(`[${station.id}] account created, but saving the sign-in failed: ${e.message}`);
         return send(res, 200, { ok: true, id: station.id, confirmEmail: r.confirmEmail, configured: false, error: `The account was created, but saving the sign-in failed (${e.message}); save it with Save sign-in.` });
@@ -692,6 +743,8 @@ export function createApp({ store, resolver, sports = null, logins = null, confi
       try {
         // Test now is how a person tries a failed sign-in again.
         logins?.allowRetry(station.id, now() + 3 * 60_000);
+        // ...and a site cooling down after a bot check.
+        cooldown.allow(siteFor(station), station.id, now() + 3 * 60_000);
         // A failed test (an ad slate, a bot check) leaves a stream that's playing alone.
         const r = await cache.get(station, { force: true, keepOnFailure: true });
         warmBackoff.delete(station.id); // it works now: warm it on the usual schedule again
