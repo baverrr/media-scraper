@@ -4,7 +4,9 @@
 
 <p align="center">
   <a href="https://github.com/baverrr/media-scraper/actions/workflows/ci.yml"><img src="https://github.com/baverrr/media-scraper/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/baverrr/media-scraper/actions/workflows/codeql.yml"><img src="https://github.com/baverrr/media-scraper/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
   <a href="https://github.com/baverrr/media-scraper/releases/latest"><img src="https://img.shields.io/github/v/release/baverrr/media-scraper?label=release" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue.svg" alt="License: GPL v3"></a>
   <img src="https://img.shields.io/badge/Jellyfin-12.2-00a4dc" alt="Jellyfin 12.2">
   <img src="https://img.shields.io/badge/sidecar-amd64%20%7C%20arm64-2496ed" alt="Sidecar image: amd64 and arm64">
 </p>
@@ -213,6 +215,8 @@ The sidecar tests run `media-scraper.js` and the resolver in a real browser (`si
 
 CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, and publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main). On a `vX.Y.Z` tag that matches `version` in `build.yaml`, it publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin catalog on GitHub Pages. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
 
+CodeQL (`.github/workflows/codeql.yml`) scans `media-scraper.js`, the sidecar, the C# plugin and the workflows with the `security-extended` queries on every push to main, every pull request and weekly. Findings show in the repository's Security tab.
+
 ## Privacy and security
 
 - **[PRIVACY.md](PRIVACY.md):** what's stored (only on your server) and which sites the sidecar contacts. No telemetry, no accounts.
@@ -221,6 +225,21 @@ CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull req
 ## Disclaimer
 
 Local Broadcast is an independent project. It isn't affiliated with or endorsed by Jellyfin, ESPN, any TV network, or any station or station group. Station names, call signs, network names and logos belong to their owners. The plugin plays only streams that stations publish for free on their own websites. You're responsible for using it in line with those websites' terms and the laws where you live.
+
+## License
+
+Copyright (C) 2026 baverrr
+
+Local Broadcast (the plugin, the sidecar and `media-scraper.js`) is free software: you can
+redistribute it and/or modify it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your option) any later
+version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+[LICENSE](LICENSE) for the full text.
+
+In short: you can use, change and share it, but versions you distribute must stay under the GPL
+with their source available. The GPL fits a Jellyfin plugin, since it builds against Jellyfin's
+own GPL-licensed libraries.
 
 ## media-scraper.js
 
