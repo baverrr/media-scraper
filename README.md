@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/baverrr/media-scraper/actions/workflows/ci.yml"><img src="https://github.com/baverrr/media-scraper/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/baverrr/media-scraper/actions/workflows/codeql.yml"><img src="https://github.com/baverrr/media-scraper/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
   <a href="https://github.com/baverrr/media-scraper/releases/latest"><img src="https://img.shields.io/github/v/release/baverrr/media-scraper?label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Jellyfin-12.2-00a4dc" alt="Jellyfin 12.2">
   <img src="https://img.shields.io/badge/sidecar-amd64%20%7C%20arm64-2496ed" alt="Sidecar image: amd64 and arm64">
@@ -204,6 +205,8 @@ docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
 The sidecar tests run `media-scraper.js` in a real browser (`sidecar/test/scraper.test.js`); they're skipped when Playwright has no browser installed.
 
 CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, and publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main). On a `vX.Y.Z` tag that matches `version` in `build.yaml`, it publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin catalog on GitHub Pages. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
+
+CodeQL (`.github/workflows/codeql.yml`) scans `media-scraper.js`, the sidecar, the C# plugin and the workflows with the `security-extended` queries on every push to main, every pull request and weekly. Findings show in the repository's Security tab.
 
 ## Privacy and security
 
