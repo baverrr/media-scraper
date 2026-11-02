@@ -115,6 +115,13 @@ stream, an embedded YouTube player, and so on.
   station's stream ahead of time, so tuning in takes about a second instead of 15 to 20.
 - 🧪 **Test now.** See exactly what the sidecar finds on a station's page, or why it can't play it.
 
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/livetv-channels.png" alt="Jellyfin Live TV Channels tab: local stations such as CW2, CBS Colorado, KOB 4 and 9NEWS with their logos, numbers and what's on now, led by the Local Sports channel"><br>Live TV &gt; Channels, with the <i>Local Sports</i> channel first</td>
+    <td width="50%"><img src="docs/images/livetv-guide.png" alt="Jellyfin Live TV Guide: rows of channels numbered 1.1 to 7.1 with Live entries from the plugin's XMLTV guide and Not streaming slots"><br>Live TV &gt; Guide, from the plugin's XMLTV guide</td>
+  </tr>
+</table>
+
 **Local sports and stations**
 
 - 🏈 **Local sports first.** Your teams' games, from ESPN's schedules, put the station airing them at the
@@ -136,6 +143,13 @@ stream, an embedded YouTube player, and so on.
 ### The settings page
 
 Everything is in **Dashboard > Plugins > Local Broadcast**:
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/settings-sidecar.png" alt="Local Broadcast settings page in the Jellyfin Dashboard: Sidecar URL, a masked API key, the tuner-and-guide and Keep streams ready switches, Save and Sync now, and a status line saying the sidecar is reachable"><br>The <b>Sidecar</b> section, with the sync status under <b>Sync now</b></td>
+    <td width="50%"><img src="docs/images/settings-stations.png" alt="Local Broadcast station list: each station's number, call sign, network, city and distance, its live-stream page, and a status such as Stream ready, Disabled with the reason, or Last attempt failed; with Test, enable, edit and delete buttons"><br>The <b>Stations</b> list, with what the sidecar last found on each station</td>
+  </tr>
+</table>
 
 | To... | Use |
 | --- | --- |
@@ -378,7 +392,7 @@ sidecar/                               the sidecar (Node.js, Playwright)
 media-scraper.js                       the browser script
 build.yaml                             plugin version and catalog metadata
 scripts/                               manifest.py, publish-repo.sh
-docs/                                  banner, icon, coverage diagram
+docs/                                  banner, icon, coverage diagram, screenshots in images/
 .github/workflows/                     CI and CodeQL
 ```
 
