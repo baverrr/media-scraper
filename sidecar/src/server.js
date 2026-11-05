@@ -2,12 +2,14 @@
 import http from 'node:http';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { readdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { StationStore } from './stations.js';
 import { Resolver } from './resolver.js';
 import { createApp } from './app.js';
 import { SportsSchedule } from './sports.js';
 import { LoginStore, parseKey } from './logins.js';
+import { VisitorStore } from './visits.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -21,7 +23,7 @@ const config = {
   port: num(env.PORT, 8899),
   host: env.HOST || '0.0.0.0',
   dataDir: env.DATA_DIR || path.join(here, '..', 'data'),
-  apiKey: env.API_KEY || '',
+  apiKey: (env.API_KEY || '').trim(),
   publicUrl: env.PUBLIC_URL || '',
   maxHeight: num(env.MAX_HEIGHT, 1080),
   ttlMinutes: num(env.RESOLVE_TTL_MINUTES, 30),
@@ -29,6 +31,9 @@ const config = {
   concurrency: num(env.MAX_CONCURRENT_RESOLVES, 2),
   ytDlp: env.YTDLP === undefined ? 'yt-dlp' : env.YTDLP,
   browserChannel: env.BROWSER_CHANNEL === undefined ? 'chrome' : env.BROWSER_CHANNEL,
+  // Keep the cookies of stations without a sign-in between visits (fewer bot checks); off, each of
+  // their visits is a first one.
+  rememberVisits: !/^(0|false|no|off)$/i.test((env.REMEMBER_VISITS || '').trim()),
   // Bundled defaults (stations + local teams) until the Jellyfin plugin sends its own.
   market: (env.MARKET || 'denver').toLowerCase(),
 };
@@ -37,6 +42,12 @@ const log = {
   info: msg => console.log(`${new Date().toISOString()} ${msg}`),
   warn: msg => console.warn(`${new Date().toISOString()} WARN ${msg}`),
 };
+
+// Station changes and saved sign-ins need the key; without one the sidecar would take them from anyone.
+if (!config.apiKey) {
+  console.error('API_KEY is not set. Set it to a random value (openssl rand -hex 24) and enter the same key in the plugin settings.');
+  process.exit(1);
+}
 
 if (!scraperPath) {
   console.error('media-scraper.js not found; set SCRAPER_PATH');
@@ -47,6 +58,17 @@ const store = new StationStore({ dataDir: config.dataDir, marketsDir: path.join(
 await store.load();
 const sports = new SportsSchedule({ teams: store.sports.teams, log });
 const logins = await new LoginStore({ dataDir: config.dataDir, key: parseKey(env.LOGIN_KEY), log }).load();
+// Turned off, the visits kept so far are deleted too, damaged copies and unfinished writes included.
+const visitors = config.rememberVisits ? await new VisitorStore({ dataDir: config.dataDir, log }).load() : null;
+if (!visitors) {
+  const files = (await readdir(config.dataDir).catch(() => [])).filter(f => /^visitors\.json(?:$|\.)/.test(f));
+  for (const f of files) {
+    await rm(path.join(config.dataDir, f), { force: true }).then(
+      () => log.info(`visits: REMEMBER_VISITS is off; deleted ${f}`),
+      e => log.warn(`visits: REMEMBER_VISITS is off, but deleting ${f} failed: ${e.message}`),
+    );
+  }
+}
 
 // The browser's time zone: TZ, else the market's (markets/<id>.json "timezone").
 const timezoneId = env.TZ || (await store.marketDefaults().catch(() => null))?.timezone || undefined;
@@ -60,7 +82,7 @@ try {
   log.warn(`time zone "${timezoneId}" isn't one Node knows; the guide uses the host's time zone`);
 }
 const resolver = new Resolver({ scraperPath, ytDlp: config.ytDlp, maxHeight: config.maxHeight, channel: config.browserChannel, timezoneId, log });
-const app = createApp({ store, resolver, sports, logins, config, log });
+const app = createApp({ store, resolver, sports, logins, visitors, config, log });
 const resolve = app.cache.resolveFn;
 app.cache.resolveFn = async station => {
   log.info(`[${station.id}] resolving ${station.url}`);
@@ -89,7 +111,7 @@ const warmer = setInterval(() => {
 }, 60_000);
 warmer.unref();
 server.listen(config.port, config.host, () => {
-  log.info(`local-broadcast sidecar on ${config.host}:${config.port}, ${store.enabled().length} stations enabled (market ${config.market}), sports ${store.sports.enabled ? `on (${store.sports.teams.length} teams)` : 'off'}${config.apiKey ? '' : ' (no API_KEY set: station changes are unauthenticated)'}`);
+  log.info(`local-broadcast sidecar on ${config.host}:${config.port}, ${store.enabled().length} stations enabled (market ${config.market}), sports ${store.sports.enabled ? `on (${store.sports.teams.length} teams)` : 'off'}`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

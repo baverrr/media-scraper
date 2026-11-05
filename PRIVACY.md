@@ -15,6 +15,8 @@ Everything is stored on the machine where you run it:
 | A fingerprint of the last station list sent to the sidecar | `plugins/Jellyfin.Plugin.LocalBroadcast/last-pushed-stations.txt` | A SHA-256 hash, so the guide can refresh after a restart. |
 | Station list and sports settings as the sidecar received them | The sidecar's data volume (`stations.json`, `sports.json`) | |
 | Station sign-ins you save: email, password, and the site's session cookies | The sidecar's data volume (`logins.json`) | Encrypted with AES-256-GCM, with the key from `LOGIN_KEY` or `login.key`. Never stored by Jellyfin, never shown again, and sent only to the station's own site when signing in. Removed with **Remove sign-in** or when the station is deleted. |
+| Cookies and site storage from station pages, for stations without a sign-in | The sidecar's data volume (`visitors.json`) | What the station's site and the services on its page set in the browser, kept so the next visit isn't a first one (fewer bot checks). Not encrypted; readable only by the sidecar's user, and sent only back to the sites that set them, as a browser would. Deleted after a month unused, after a bot check, when the station gets a sign-in, and when the station is removed. `REMEMBER_VISITS=false` turns this off and deletes the file, along with any damaged copies of it. |
+| Which sites showed a bot check recently, and how long to wait before trying them again | Sidecar memory only | Gone when the container restarts. |
 | Resolved stream URLs | Sidecar memory only | Gone when the container restarts. |
 | Logs | The sidecar's container log and Jellyfin's log | Station ids, station page URLs, errors and timings. Nothing about who is watching. |
 
@@ -26,7 +28,7 @@ The button asks your browser for its location, which the browser only shares aft
 
 - **The Jellyfin plugin** talks only to your sidecar (the URL you set), and to Jellyfin itself.
 - **The sidecar** connects to:
-  - **TV station websites** in your station list. It opens each station's live page in a headless browser, the same way a viewer's browser would. That means the page's own scripts run, including any third-party ads, analytics or video players on it. Those services can see your server's IP address and set cookies. Each page is opened in a fresh browser session that is closed afterwards, so cookies are not kept between visits.
+  - **TV station websites** in your station list. It opens each station's live page in a headless browser, the same way a viewer's browser would. That means the page's own scripts run, including any third-party ads, analytics or video players on it. Those services can see your server's IP address and set cookies. Each page is opened in a browser session that is closed afterwards. For a station without a sign-in, the cookies and site storage it ends with are kept for its next visit, as a browser you use every day would keep them (see `visitors.json` above), unless the page showed a bot check or `REMEMBER_VISITS=false`. Stations with a sign-in start from their saved session instead.
   - **Video hosts and CDNs** serving those stations' streams, including Google's ad-insertion service (`dai.google.com`) for stations that use it.
   - **ESPN's public site API** (`site.api.espn.com`), for your local teams' schedules and TV listings. The request contains the league and team, nothing about you.
   - **Video sites supported by yt-dlp** (such as YouTube), only for stations whose stream URL points to one.

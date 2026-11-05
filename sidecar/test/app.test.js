@@ -638,3 +638,23 @@ test('keep ready: a sync that sends the same stations again doesn\'t discard a w
     server.close();
   }
 });
+
+test('API: without an API key nothing can be changed, and unexpected errors don\'t leak their text', async () => {
+  const marketsDir = path.join(dataDir, 'markets-nokey');
+  await mkdir(marketsDir, { recursive: true });
+  await writeFile(path.join(marketsDir, 't.json'), JSON.stringify({ name: 'T', stations: [{ id: 'x', name: 'X', url: 'https://station.example/live' }] }));
+  const store = await new StationStore({ dataDir: path.join(dataDir, 'nokey'), marketsDir, market: 't' }).load();
+  const resolver = { async resolve() { throw new Error('ENOENT: /srv/private/path'); } };
+  const local = createApp({ store, resolver, config: { slate: false }, log: {} });
+  const server = http.createServer(local.handler);
+  const url = await listen(server);
+  try {
+    const put = await fetch(`${url}/api/stations`, { method: 'PUT', body: '[]', headers: { 'x-api-key': '' } });
+    assert.equal(put.status, 401);
+    const failed = await fetch(`${url}/stream/x.m3u8`);
+    assert.equal(failed.status, 500);
+    assert.deepEqual(await failed.json(), { error: 'internal error' });
+  } finally {
+    server.close();
+  }
+});
