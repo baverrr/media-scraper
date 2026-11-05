@@ -129,7 +129,8 @@ test('cooldown: Test now\'s allowance is for its station, lets one attempt throu
   assert.equal(c.waitingUntil(site, 'a'), 0);
   assert.notEqual(c.waitingUntil(site, 'a'), 0); // used up
   // A bot check on the attempt it let through does make the wait longer.
-  assert.equal(c.challenged(site), t + 30 * 60_000);
+  assert.equal(c.challenged(site), t + 15 * 60_000); // another attempt's bot check: still the same one
+  assert.equal(c.challenged(site, { allowed: true }), t + 30 * 60_000); // the attempt Test now let through
   c.allow(site, 'a', t + 60_000);
   t += 2 * 60_000;
   assert.notEqual(c.waitingUntil(site, 'a'), 0); // lapsed
@@ -319,5 +320,107 @@ test('resolver: comes back to a page as the same visitor, and forgets the visit 
   } finally {
     await resolver.close();
     site.close();
+  }
+});
+
+test('visits: a resolve that began before its visit was forgotten, or its station removed, doesn\'t save it back', async () => {
+  const store = await new VisitorStore({ dataDir: path.join(dir, 'race') }).load();
+  const state = v => ({ cookies: [{ name: 'visitor', value: v, domain: 'station.example', path: '/' }], origins: [] });
+  // The station got a sign-in meanwhile.
+  const signedIn = store.open('a');
+  await store.forget('a');
+  await signedIn.save(state('v1'));
+  assert.equal(store.get('a'), null);
+  // The station was removed meanwhile, before it had any visit saved.
+  const removed = store.open('b');
+  await store.keepOnly(['a']);
+  await removed.save(state('v1'));
+  assert.equal(store.get('b'), null);
+  // A resolve's own forgetting (a visit the browser won't take) still saves the new one.
+  const own = store.open('a');
+  await own.forget();
+  await own.save(state('v2'));
+  assert.equal(store.get('a').cookies[0].value, 'v2');
+  assert.doesNotMatch(await readFile(path.join(dir, 'race', 'visitors.json'), 'utf8'), /v1/);
+});
+
+test('visits: the same visit again isn\'t rewritten until a day later; a savedAt that isn\'t a number is expired', async () => {
+  let t = Date.UTC(2026, 9, 1);
+  const data = path.join(dir, 'unchanged');
+  const store = await new VisitorStore({ dataDir: data, now: () => t }).load();
+  const state = { cookies: [{ name: 'visitor', value: 'v1', domain: 'station.example', path: '/' }], origins: [] };
+  await store.save('a', state);
+  const file = path.join(data, 'visitors.json');
+  const first = await readFile(file, 'utf8');
+  t += 60_000;
+  await store.save('a', state);
+  assert.equal(await readFile(file, 'utf8'), first);
+  t += 86_400_000;
+  await store.save('a', state);
+  assert.notEqual(await readFile(file, 'utf8'), first);
+
+  await writeFile(file, JSON.stringify({ version: 1, stations: { a: { state, savedAt: String(t) } } }));
+  assert.equal((await new VisitorStore({ dataDir: data, now: () => t }).load()).get('a'), null);
+});
+
+test('cooldown: until() doesn\'t use up an allowance, and revoke() ends an unused one', () => {
+  let t = 0;
+  const c = new SiteCooldown({ now: () => t });
+  const site = 'station.example';
+  c.challenged(site);
+  c.allow(site, 'a', t + 60_000);
+  assert.equal(c.until(site), 15 * 60_000);
+  assert.deepEqual(c.admit(site, 'a'), { until: 0, allowed: true });
+  c.allow(site, 'a', t + 60_000);
+  c.revoke(site, 'a');
+  assert.deepEqual(c.admit(site, 'a'), { until: 15 * 60_000, allowed: false });
+  assert.equal(c.until('elsewhere.example'), 0);
+});
+
+test('app: the warm-up doesn\'t count a site\'s bot-check wait as failures of its own', async () => {
+  const store = await marketStore('warm-cooldown', [{ id: 'a', name: 'A', url: 'https://station.example/live', keepReady: true }]);
+  let t = Date.UTC(2026, 9, 31, 3);
+  const start = t;
+  const calls = [];
+  const resolver = { async resolve() { calls.push((t - start) / 60_000); throw botCheck(); } };
+  const app = createApp({ store, resolver, config: { apiKey: 'secret', failureSeconds: 0, timezone: 'UTC' }, log: {}, now: () => t });
+  for (; t <= start + 50 * 60_000; t += 5 * 60_000) await app.warmStations();
+  // A bot check at 0 (15-minute wait), again at 15 (30 minutes), then tried as soon as that ends.
+  assert.deepEqual(calls, [0, 15, 45]);
+});
+
+test('app: Test now that joins a resolve already running leaves no allowance behind', async () => {
+  const store = await marketStore('join', [{ id: 'a', name: 'A', url: 'https://station.example/live' }]);
+  let t = Date.UTC(2026, 9, 31, 12);
+  const calls = [];
+  let release;
+  const resolver = {
+    async resolve(station) {
+      calls.push(station.id);
+      if (calls.length === 2) {
+        await new Promise(r => { release = r; });
+        throw new Error('page.goto: Timeout 45000ms exceeded'); // neither ends nor renews the wait
+      }
+      throw botCheck();
+    },
+  };
+  const app = createApp({ store, resolver, config: { apiKey: 'secret', failureSeconds: 0 }, log: {}, now: () => t });
+  const server = http.createServer(app.handler);
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  try {
+    await assert.rejects(app.cache.get(store.get('a')), /bot check/);
+    // Test now's own attempt is running when a second Test now joins it.
+    const first = fetch(`http://127.0.0.1:${server.address().port}/api/stations/a/test`, { method: 'POST', headers: { 'x-api-key': 'secret' } });
+    while (!release) await new Promise(r => setTimeout(r, 5));
+    const second = fetch(`http://127.0.0.1:${server.address().port}/api/stations/a/test`, { method: 'POST', headers: { 'x-api-key': 'secret' } });
+    await new Promise(r => setTimeout(r, 50));
+    release();
+    await Promise.all([first, second]);
+    // A tune-in a minute later still waits, rather than taking the second Test now's allowance.
+    t += 60_000;
+    await assert.rejects(app.cache.get(store.get('a')), /leaving it alone/);
+    assert.equal(calls.length, 2);
+  } finally {
+    server.close();
   }
 });

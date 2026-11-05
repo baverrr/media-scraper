@@ -23,7 +23,7 @@ const config = {
   port: num(env.PORT, 8899),
   host: env.HOST || '0.0.0.0',
   dataDir: env.DATA_DIR || path.join(here, '..', 'data'),
-  apiKey: env.API_KEY || '',
+  apiKey: (env.API_KEY || '').trim(),
   publicUrl: env.PUBLIC_URL || '',
   maxHeight: num(env.MAX_HEIGHT, 1080),
   ttlMinutes: num(env.RESOLVE_TTL_MINUTES, 30),
@@ -33,7 +33,7 @@ const config = {
   browserChannel: env.BROWSER_CHANNEL === undefined ? 'chrome' : env.BROWSER_CHANNEL,
   // Keep the cookies of stations without a sign-in between visits (fewer bot checks); off, each of
   // their visits is a first one.
-  rememberVisits: !/^(0|false|no|off)$/i.test(env.REMEMBER_VISITS || ''),
+  rememberVisits: !/^(0|false|no|off)$/i.test((env.REMEMBER_VISITS || '').trim()),
   // Bundled defaults (stations + local teams) until the Jellyfin plugin sends its own.
   market: (env.MARKET || 'denver').toLowerCase(),
 };
@@ -42,6 +42,12 @@ const log = {
   info: msg => console.log(`${new Date().toISOString()} ${msg}`),
   warn: msg => console.warn(`${new Date().toISOString()} WARN ${msg}`),
 };
+
+// Station changes and saved sign-ins need the key; without one the sidecar would take them from anyone.
+if (!config.apiKey) {
+  console.error('API_KEY is not set. Set it to a random value (openssl rand -hex 24) and enter the same key in the plugin settings.');
+  process.exit(1);
+}
 
 if (!scraperPath) {
   console.error('media-scraper.js not found; set SCRAPER_PATH');
@@ -105,7 +111,7 @@ const warmer = setInterval(() => {
 }, 60_000);
 warmer.unref();
 server.listen(config.port, config.host, () => {
-  log.info(`local-broadcast sidecar on ${config.host}:${config.port}, ${store.enabled().length} stations enabled (market ${config.market}), sports ${store.sports.enabled ? `on (${store.sports.teams.length} teams)` : 'off'}${config.apiKey ? '' : ' (no API_KEY set: station changes are unauthenticated)'}`);
+  log.info(`local-broadcast sidecar on ${config.host}:${config.port}, ${store.enabled().length} stations enabled (market ${config.market}), sports ${store.sports.enabled ? `on (${store.sports.teams.length} teams)` : 'off'}`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

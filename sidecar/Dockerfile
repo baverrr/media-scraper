@@ -1,7 +1,7 @@
 # Build from the repository root so media-scraper.js is in the context:
 #   docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
 # The base image's bundled Chromium matches the playwright version in package.json.
-FROM mcr.microsoft.com/playwright:v1.64.0-noble
+FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
 
 ARG TARGETARCH
 # "latest", or a release tag such as 2026.10.01. yt-dlp needs frequent updates for YouTube, so
