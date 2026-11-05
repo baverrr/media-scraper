@@ -391,3 +391,9 @@ test('API: a station sync drops sign-ins of stations no longer sent, but an empt
     server.close();
   }
 });
+
+test('logins: a shortened auth tag doesn\'t decrypt', () => {
+  const key = randomBytes(32);
+  const box = encrypt(key, { username: 'a@example.com', password: 'p' });
+  assert.throws(() => decrypt(key, { ...box, tag: Buffer.from(box.tag, 'base64').subarray(0, 4).toString('base64') }));
+});

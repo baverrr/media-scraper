@@ -1,0 +1,7 @@
+# Keeps the SHA-pinned actions current. The sidecar's base image and its playwright package are
+# left out: their versions have to move together, which Dependabot can't do across ecosystems.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

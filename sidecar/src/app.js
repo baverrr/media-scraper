@@ -262,11 +262,7 @@ export function createApp({ store, resolver, sports = null, logins = null, visit
   // A station's last visit, for one without a sign-in (its session plays that part).
   function visitFor(station) {
     if (!visitors || logins?.get(station.id)) return null;
-    return {
-      state: visitors.get(station.id),
-      save: state => visitors.save(station.id, state),
-      forget: () => visitors.forget(station.id),
-    };
+    return visitors.open(station.id);
   }
 
   // Signed in, a station's session takes the place of its visit; failing to forget it is only logged.
@@ -282,7 +278,7 @@ export function createApp({ store, resolver, sports = null, logins = null, visit
   }
   async function resolveStation(station) {
     const site = siteFor(station);
-    const until = cooldown.waitingUntil(site, station.id);
+    const { until, allowed } = cooldown.admit(site, station.id);
     if (until) {
       throw Object.assign(new Error(`The station's site showed a bot check; leaving it alone for ${minutesTo(until)} more before trying again (Test now tries at once)`), {
         details: { reason: 'bot-check', cooldown: true, retryAt: new Date(until).toISOString() },
@@ -295,7 +291,7 @@ export function createApp({ store, resolver, sports = null, logins = null, visit
     } catch (e) {
       const reason = e?.details?.reason;
       if (reason === 'bot-check' && site) {
-        const wait = cooldown.challenged(site);
+        const wait = cooldown.challenged(site, { allowed });
         e.message += `; trying the site again in ${minutesTo(wait)}`;
         e.details.retryAt = new Date(wait).toISOString();
         log.info?.(`[${station.id}] ${site} showed a bot check; leaving it alone for ${minutesTo(wait)}`);
@@ -395,6 +391,8 @@ export function createApp({ store, resolver, sports = null, logins = null, visit
       // Not before the backoff, nor while someone else's failure is still remembered (that isn't a
       // new attempt, so it doesn't count toward the backoff either).
       if ((backoff && backoff.until > t) || cache.failedRecently(station.id)) return;
+      // Nor while its site is left alone after a bot check: that's no attempt either.
+      if (cooldown.until(siteFor(station)) > t) return;
       // Streams whose links expire within minutes aren't renewed in the background more often
       // than every 10 minutes; tuning in still resolves them when needed.
       if (cache.resolvedWithin(station.id, WARM_MIN_GAP_MS)) return;
@@ -406,8 +404,9 @@ export function createApp({ store, resolver, sports = null, logins = null, visit
         if (edited()) return;
         warmBackoff.delete(station.id);
         warmed.push(station.id);
-      } catch {
-        if (edited()) return;
+      } catch (e) {
+        // Turned away by a bot-check cooldown that began meanwhile: not an attempt.
+        if (edited() || e?.details?.cooldown) return;
         const failures = (backoff?.failures ?? 0) + 1;
         warmBackoff.set(station.id, { failures, until: retryAt(station, Math.min(5 * 60_000 * 2 ** (failures - 1), 3_600_000)) });
       }
@@ -562,8 +561,9 @@ export function createApp({ store, resolver, sports = null, logins = null, visit
     await pipeline(Readable.fromWeb(up.body), res).catch(() => {});
   }
 
+  // Without an API key nothing is authorized: changes need one (server.js won't start without it).
   function authorized(req) {
-    if (!apiKey) return true;
+    if (!apiKey) return false;
     const given = Buffer.from(String(req.headers['x-api-key'] || ''));
     const want = Buffer.from(apiKey);
     return given.length === want.length && timingSafeEqual(given, want);
@@ -746,7 +746,8 @@ export function createApp({ store, resolver, sports = null, logins = null, visit
         // ...and a site cooling down after a bot check.
         cooldown.allow(siteFor(station), station.id, now() + 3 * 60_000);
         // A failed test (an ad slate, a bot check) leaves a stream that's playing alone.
-        const r = await cache.get(station, { force: true, keepOnFailure: true });
+        const r = await cache.get(station, { force: true, keepOnFailure: true })
+          .finally(() => cooldown.revoke(siteFor(station), station.id));
         warmBackoff.delete(station.id); // it works now: warm it on the usual schedule again
         return send(res, 200, {
           ok: true, id: station.id, via: r.via, type: r.type, url: r.url, tookMs: r.tookMs,
@@ -766,7 +767,10 @@ export function createApp({ store, resolver, sports = null, logins = null, visit
     } catch (e) {
       const status = e instanceof HttpError ? e.status : e instanceof URIError ? 400 : (e.details ? 502 : 500);
       if (status >= 500) log.warn?.(`${req.method} ${req.url}: ${e.message}`);
-      if (!res.headersSent) send(res, status, { error: e.message, details: e.details });
+      // An unexpected error's text (paths, browser errors) stays in the log; a failed resolve's
+      // details (candidate URLs, probes) go only to callers with the API key.
+      const body = status === 500 ? { error: 'internal error' } : { error: e.message, ...(e.details && authorized(req) ? { details: e.details } : {}) };
+      if (!res.headersSent) send(res, status, body);
       else res.destroy();
     }
   }

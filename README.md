@@ -178,7 +178,7 @@ Missing your area? [CONTRIBUTING.md](CONTRIBUTING.md) shows the format and how t
 
 | Variable | Default | |
 | --- | --- | --- |
-| `API_KEY` | none | Required for changes from the plugin (`X-Api-Key`). The compose file reads it from `LOCAL_BROADCAST_API_KEY` in `sidecar/.env`. |
+| `API_KEY` | none, **required** | Authorizes changes from the plugin (`X-Api-Key`). The sidecar doesn't start without it, also when you run the image with `docker run` (pass `-e API_KEY=…`). The compose file reads it from `LOCAL_BROADCAST_API_KEY` in `sidecar/.env`. |
 | `MARKET` | set in `compose.yaml` | Stations and teams used until the plugin sends its own. |
 | `TZ` | the market's | Time zone the station pages see, and the guide's newscast times (e.g. `America/Chicago`). Set, it overrides the plugin's main market. |
 | `MAX_HEIGHT` | `1080` | Highest quality picked from a station's variants. |
@@ -189,7 +189,7 @@ Missing your area? [CONTRIBUTING.md](CONTRIBUTING.md) shows the format and how t
 | `BROWSER_CHANNEL` | `chrome` | Google Chrome; empty uses the bundled Chromium (what ARM uses). Both play H.264/AAC. |
 | `PUBLIC_URL` | from the request | Base URL written into the M3U. |
 
-HTTP API: `GET /playlist.m3u`, `GET /guide.xml`, `GET /stream/<id>.m3u8` (`local-sports` included), `GET /api/status`, `GET /api/sports`, `GET /api/stations`. With the API key: `PUT /api/stations`, `PUT /api/sports`, `POST /api/stations/<id>/test`. Proxied segment URLs are HMAC-signed, so the proxy can't be used to fetch arbitrary URLs.
+HTTP API: `GET /playlist.m3u`, `GET /guide.xml`, `GET /stream/<id>.m3u8` (`local-sports` included), `GET /api/status`, `GET /api/sports`, `GET /api/stations`. With the API key: `PUT /api/stations`, `PUT /api/sports`, `POST /api/stations/<id>/test`. Proxied segment URLs are HMAC-signed, so the proxy can't be used to fetch arbitrary URLs. Errors on the routes without the key say what failed, not why: an unexpected error answers `internal error` (its text goes to the log), and a failed resolve's details (candidate URLs, probes) come only with the key, from **Test now**.
 
 ## Station sign-ins
 
@@ -216,6 +216,8 @@ The sidecar tests run `media-scraper.js` and the resolver in a real browser (`si
 CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, and publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main). On a `vX.Y.Z` tag that matches `version` in `build.yaml`, it publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin catalog on GitHub Pages. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
 
 CodeQL (`.github/workflows/codeql.yml`) scans `media-scraper.js`, the sidecar, the C# plugin and the workflows with the `security-extended` queries on every push to main, every pull request and weekly. Findings show in the repository's Security tab.
+
+The workflows' actions are pinned to commit SHAs (the version is in a comment beside each), and Dependabot (`.github/dependabot.yml`) proposes updates weekly. The sidecar's base image is pinned by digest; when you bump `playwright` in `sidecar/package.json`, update the image tag and its digest in `sidecar/Dockerfile` with it (`docker buildx imagetools inspect mcr.microsoft.com/playwright:vX.Y.Z-noble`).
 
 ## Privacy and security
 

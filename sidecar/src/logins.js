@@ -5,8 +5,9 @@
 //
 // The key is LOGIN_KEY (32 bytes, base64 or hex) when set, so logins.json alone (a backup of the
 // data volume, say) reveals nothing. Without it, a key is generated once into DATA_DIR/login.key.
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
-import { readFile, writeFile, rename, mkdir, chmod } from 'node:fs/promises';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { JsonFile } from './jsonfile.js';
 import path from 'node:path';
 
 const text = v => (v === undefined || v === null ? '' : String(v).trim());
@@ -27,7 +28,8 @@ export function encrypt(key, value) {
 }
 
 export function decrypt(key, box) {
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(box.iv, 'base64'));
+  // The full 16-byte tag, so a shortened one can't pass.
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(box.iv, 'base64'), { authTagLength: 16 });
   decipher.setAuthTag(Buffer.from(box.tag, 'base64'));
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(box.data, 'base64')), decipher.final()]).toString('utf8'));
 }
@@ -49,7 +51,11 @@ export class LoginStore {
     this.key = key;
     this.log = log;
     this.entries = new Map(); // id -> { username, password, session, signedInAt, error }
-    this.writing = Promise.resolve();
+    this.json = new JsonFile(this.file, () => {
+      const stations = {};
+      for (const [id, { retry, ...entry }] of this.entries) stations[id] = encrypt(this.key, entry);
+      return JSON.stringify({ version: 1, stations }, null, 2) + '\n';
+    });
   }
 
   async load() {
@@ -70,9 +76,7 @@ export class LoginStore {
     } catch (e) {
       if (e.code === 'ENOENT') { /* no sign-ins yet */ } else if (e instanceof SyntaxError) {
         // Never keep the sidecar from starting: set the damaged file aside; sign-ins are entered again.
-        const aside = `${this.file}.damaged-${Date.now()}`;
-        await rename(this.file, aside).catch(() => {});
-        this.log.warn?.(`sign-ins: ${this.file} was damaged; moved it to ${aside}`);
+        await this.json.setAside(this.log, 'sign-ins');
       } else throw e;
     }
     for (const [id, box] of Object.entries(saved)) {
@@ -89,17 +93,7 @@ export class LoginStore {
   // One write at a time, each of the entries as they are when it starts, so overlapping saves
   // (a sign-in finishing while the settings page saves an account) can't trip over each other.
   persist() {
-    const write = async () => {
-      const stations = {};
-      for (const [id, { retry, ...entry }] of this.entries) stations[id] = encrypt(this.key, entry);
-      const tmp = `${this.file}.${randomUUID()}.tmp`;
-      await writeFile(tmp, JSON.stringify({ version: 1, stations }, null, 2) + '\n', { mode: 0o600 });
-      await rename(tmp, this.file);
-      await chmod(this.file, 0o600).catch(() => {});
-    };
-    const done = this.writing.then(write, write);
-    this.writing = done.catch(() => {});
-    return done;
+    return this.json.write();
   }
 
   get(id) {

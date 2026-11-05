@@ -13,6 +13,6 @@ Include what you found, how to reproduce it, and which versions you tested. You'
 ## Running it safely
 
 - **Keep the sidecar private.** By default it listens on `127.0.0.1:8899` only. Jellyfin re-serves the streams to your clients, so the sidecar never needs to be reachable from your network or the internet.
-- **Set an API key.** Changes to stations and sports settings need the `X-Api-Key` header. Generate a long random key (the README's install step does), keep `sidecar/.env` readable only by you (`chmod 600`), and don't commit it.
+- **Set an API key.** Changes to stations, sports settings and sign-ins need the `X-Api-Key` header, and the sidecar refuses to start without `API_KEY`, so it never runs with those changes open to anyone. Generate a long random key (the README's install step does), keep `sidecar/.env` readable only by you (`chmod 600`), and don't commit it.
 - **The stream proxy only serves what it resolved.** Segment URLs are signed with a per-start HMAC key, so the proxy can't be used to fetch arbitrary URLs.
 - **The headless browser visits station websites** listed in your settings. Only add stations whose sites you trust as much as you would visiting them in your own browser.
