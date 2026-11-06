@@ -32,21 +32,9 @@ It works with Jellyfin 12.2 and needs a small companion Docker container, the *s
 
 Many local TV stations stream live for free on their websites, but their players need a real browser, and the stream URLs carry tokens that expire. The sidecar handles both:
 
-```mermaid
-flowchart TB
-    C["Jellyfin apps: TV, phone, web"]
-    subgraph server["Your server"]
-        J["Jellyfin + Local Broadcast plugin"]
-        S["Sidecar (Docker): headless Chrome + media-scraper.js"]
-    end
-    W["Station websites"]
-    E["ESPN schedules"]
-    J -- "Live TV" --> C
-    J -- "stations, teams" --> S
-    S -- "playlist, guide, streams" --> J
-    S -- "finds each live stream" --> W
-    S -- "team schedules" --> E
-```
+<p align="center">
+  <img src="docs/diagrams/architecture.svg" alt="The plugin's settings page saves stations and teams; SyncService pushes them to the sidecar and LiveTvRegistrar adds the sidecar to Jellyfin Live TV as an M3U tuner and XMLTV guide. Live TV asks the sidecar's app.js for the playlist, guide and streams; resolver.js opens each station's page in headless Chrome with media-scraper.js loaded first, and app.js proxies the HLS segments. sports.js reads team schedules from ESPN.">
+</p>
 
 | Part | What it does |
 | --- | --- |
@@ -57,13 +45,9 @@ flowchart TB
 
 Give the plugin your local teams (each bundled market comes with its area's teams). The sidecar reads each team's schedule and TV listings from ESPN's public API. It matches over-the-air broadcasts to your stations by network (a CBS game is on the CBS affiliate), call sign, name, or the station's *sports aliases*.
 
-```mermaid
-flowchart LR
-    A["ESPN: your team<br/>plays at 7:00 on NBC"] --> B["Sidecar matches NBC<br/>to your NBC station"]
-    B --> C["6:45: stream fetched early,<br/>station moves to the top"]
-    C --> D["Local Sports channel<br/>plays that station"]
-    D --> E["Game ends:<br/>back to normal"]
-```
+<p align="center">
+  <img src="docs/diagrams/local-sports.svg" alt="Every 30 minutes SyncService asks the sidecar for the week's games, which sports.js reads from ESPN and matches to your stations; when the games changed, Jellyfin refreshes the guide and shows each game under Sports. Every minute the sidecar resolves the stream of any station airing a game. Tuning in to Local Sports plays that station's stream, or an off-air card between games.">
+</p>
 
 While a game is on (from 15 minutes before the start):
 
@@ -206,6 +190,8 @@ docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
 The sidecar tests run `media-scraper.js` in a real browser (`sidecar/test/scraper.test.js`); they're skipped when Playwright has no browser installed.
 
 CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, and publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main). On a `vX.Y.Z` tag that matches `version` in `build.yaml`, it publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin catalog on GitHub Pages. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
+
+The diagrams in this README are drawn with [archgram](https://www.npmjs.com/package/archgram) from the specs in `docs/diagrams/`. Each box and line in a spec names the code behind it, so after changing that code, run `npx archgram check docs/diagrams/<name>.archgram.yaml` and then `npx archgram build` on the same file to redraw it.
 
 CodeQL (`.github/workflows/codeql.yml`) scans `media-scraper.js`, the sidecar, the C# plugin and the workflows with the `security-extended` queries on every push to main, every pull request and weekly. Findings show in the repository's Security tab.
 

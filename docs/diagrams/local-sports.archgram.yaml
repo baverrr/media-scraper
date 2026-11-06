@@ -1,0 +1,49 @@
+archgram: 1
+diagram: sequence
+look: avatars
+title: Local sports
+description: >-
+  Every 30 minutes the plugin's sync service asks the sidecar for the week's
+  games; the sidecar's sports schedule reads each team's schedule from ESPN
+  and matches the broadcasts to your stations, and when the games changed the
+  plugin has Jellyfin refresh the guide, which then shows each game. Every
+  minute the sidecar resolves the stream of any station airing a game, from
+  15 minutes before the start. When a viewer tunes in to Local Sports, the
+  sidecar plays the station airing the game, or an off-air card between games.
+participants:
+  - { id: sync, kind: service, label: SyncService, tech: dotnet, source: ../../Jellyfin.Plugin.LocalBroadcast/SyncService.cs }
+  - { id: livetv, kind: service, label: Jellyfin Live TV, tech: jellyfin, variant: external }
+  - { id: app, kind: service, label: app.js, tech: nodedotjs, source: ../../sidecar/src/app.js }
+  - { id: resolver, kind: service, label: resolver.js, note: headless Chrome, tech: googlechrome, source: ../../sidecar/src/resolver.js }
+  - { id: sports, kind: service, label: sports.js, source: ../../sidecar/src/sports.js }
+  - { id: espn, kind: service, label: ESPN API, variant: external }
+messages:
+  - phase: Every 30 minutes, check the games
+  - { from: sync, to: app, label: GET /api/sports, source: "../../Jellyfin.Plugin.LocalBroadcast/SyncService.cs#_sidecar.SportsAsync(config" }
+  - { from: app, to: sports, label: games this week, source: "../../sidecar/src/app.js#sports.between(store.enabled()" }
+  - { from: sports, to: espn, label: team schedule, source: "../../sidecar/src/sports.js#await this.fetchImpl(url" }
+  - { reply: espn, label: games + TV }
+  - { reply: sports, label: matched games }
+  - { reply: app, label: upcoming games }
+  - opt:
+      when: the games changed
+      source: "../../Jellyfin.Plugin.LocalBroadcast/SyncService.cs#!string.Equals(games, _lastGames"
+      messages:
+        - { from: sync, to: livetv, label: refresh guide, async: true, source: "../../Jellyfin.Plugin.LocalBroadcast/SyncService.cs#_registrar.QueueGuideRefresh();" }
+        - { from: livetv, to: app, label: GET /guide.xml, source: "../../sidecar/src/app.js#p === '/guide.xml'" }
+        - { reply: app, label: game under Sports }
+  - phase: Every minute, warm up the stream
+  - { from: app, to: sports, label: on air now?, source: "../../sidecar/src/app.js#sports.onAirNow(store.enabled())" }
+  - { reply: sports, label: game stations }
+  - { from: app, to: resolver, label: resolve early, source: "../../sidecar/src/app.js#cache.get(station, { priority: 0 })" }
+  - { reply: resolver, label: fresh stream URL }
+  - phase: A viewer tunes in to Local Sports
+  - { from: livetv, to: app, label: tune Local Sports, source: '../../sidecar/src/app.js#p.match(/^\/stream\/local-sports' }
+  - alt:
+      - when: a game is on
+        source: "../../sidecar/src/app.js#if (!onAir.length)"
+        messages:
+          - { reply: app, label: "the station's stream" }
+      - when: else
+        messages:
+          - { reply: app, label: off-air card }
