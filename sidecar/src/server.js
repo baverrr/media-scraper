@@ -10,6 +10,7 @@ import { createApp } from './app.js';
 import { SportsSchedule } from './sports.js';
 import { LoginStore, parseKey } from './logins.js';
 import { VisitorStore } from './visits.js';
+import { AnvatoSources } from './anvato.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -34,6 +35,9 @@ const config = {
   // Keep the cookies of stations without a sign-in between visits (fewer bot checks); off, each of
   // their visits is a first one.
   rememberVisits: !/^(0|false|no|off)$/i.test((env.REMEMBER_VISITS || '').trim()),
+  // Ask Anvato's video API directly for stations whose player is Anvato, instead of opening the
+  // page each time (see anvato.js); off, every resolve opens the page.
+  anvatoFastPath: !/^(0|false|no|off)$/i.test((env.ANVATO_FAST_PATH || '').trim()),
   // Bundled defaults (stations + local teams) until the Jellyfin plugin sends its own.
   market: (env.MARKET || 'denver').toLowerCase(),
 };
@@ -59,6 +63,7 @@ await store.load();
 const sports = new SportsSchedule({ teams: store.sports.teams, log });
 const logins = await new LoginStore({ dataDir: config.dataDir, key: parseKey(env.LOGIN_KEY), log }).load();
 // Turned off, the visits kept so far are deleted too, damaged copies and unfinished writes included.
+const anvato = config.anvatoFastPath ? await new AnvatoSources({ file: path.join(config.dataDir, 'anvato.json'), log }).load() : false;
 const visitors = config.rememberVisits ? await new VisitorStore({ dataDir: config.dataDir, log }).load() : null;
 if (!visitors) {
   const files = (await readdir(config.dataDir).catch(() => [])).filter(f => /^visitors\.json(?:$|\.)/.test(f));
@@ -81,7 +86,7 @@ try {
 } catch {
   log.warn(`time zone "${timezoneId}" isn't one Node knows; the guide uses the host's time zone`);
 }
-const resolver = new Resolver({ scraperPath, ytDlp: config.ytDlp, maxHeight: config.maxHeight, channel: config.browserChannel, timezoneId, log });
+const resolver = new Resolver({ scraperPath, ytDlp: config.ytDlp, maxHeight: config.maxHeight, channel: config.browserChannel, timezoneId, anvato, log });
 const app = createApp({ store, resolver, sports, logins, visitors, config, log });
 const resolve = app.cache.resolveFn;
 app.cache.resolveFn = async station => {
