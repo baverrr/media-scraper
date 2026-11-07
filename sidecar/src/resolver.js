@@ -2,6 +2,8 @@
 // loaded before the page's own scripts, records every manifest the page requests (with the
 // headers it sent), presses play if nothing loads, then probes the candidates from Node and
 // keeps the best live one. Pages that only embed YouTube/Twitch/etc. fall back to yt-dlp.
+// Stations whose player is Anvato skip the browser once a page resolve has seen the player's
+// video request: see anvato.js.
 import { readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -9,8 +11,12 @@ import { chromium } from 'playwright';
 import { probeManifest } from './probe.js';
 import { DAI_BLOCKED_HOST_RE, isAd, manifestTypeOf, mergeCandidates, pickBest, pickHeaders, unblockedStreamUrl } from './pick.js';
 import { expiryFromUrl } from './hls.js';
+import { AnvatoSources, anvatoSource, fetchAnvato, isAnvatoHost } from './anvato.js';
 
 const run = promisify(execFile);
+
+// The user agent for requests the sidecar makes without the browser.
+const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
 const PLAY_SELECTORS = [
   '.vjs-big-play-button',
@@ -198,7 +204,11 @@ function cookieHeader(cookies, url) {
 export class Resolver {
   // timezoneId: the station's time zone for the browser (players check it against the market);
   // unset uses the host's.
-  constructor({ scraperPath, ytDlp = 'yt-dlp', maxHeight = 1080, pageTimeoutMs = 45_000, waitMs = 20_000, channel = 'chrome', timezoneId, log = console } = {}) {
+  // anvato: where the Anvato fast path keeps what it learned (an AnvatoSources), or false to turn
+  // the fast path off. fetchImpl is for tests.
+  constructor({ scraperPath, ytDlp = 'yt-dlp', maxHeight = 1080, pageTimeoutMs = 45_000, waitMs = 20_000, channel = 'chrome', timezoneId, anvato, fetchImpl = fetch, log = console } = {}) {
+    this.anvato = anvato === undefined ? new AnvatoSources({ log }) : anvato || null;
+    this.fetchImpl = fetchImpl;
     this.scraperPath = scraperPath;
     this.timezoneId = timezoneId;
     this.channel = channel;
@@ -252,6 +262,11 @@ export class Resolver {
   // ({ state, save, forget }; see visits.js), so the page sees a returning visitor.
   async resolve(station, login = null, visit = null) {
     if (station.streamUrl) return this.resolveManual(station);
+    // Signed-in stations always go through the page, so their session stays the one in use.
+    if (!login) {
+      const fast = await this.resolveAnvato(station);
+      if (fast) return fast;
+    }
     try {
       return await this.resolvePage(station, login, login ? null : visit);
     } catch (e) {
@@ -293,6 +308,7 @@ export class Resolver {
       : await contextFor(login?.session);
     const found = [];
     const embeds = [];
+    const anvatoSeen = [];
     // The cookies and site storage the page ended with, for the station's next visit. A context
     // that's already closed has nothing to keep; a visit that can't be saved is logged.
     const keepVisit = async () => {
@@ -318,6 +334,8 @@ export class Resolver {
 
       context.on('response', async res => {
         try {
+          const anvato = this.anvato && anvatoSource(res.url());
+          if (anvato) anvatoSeen.unshift(anvato);
           const url = unblockedStreamUrl(res.url());
           const type = manifestTypeOf(url, res.headers()['content-type'] || '');
           if (!type || isAd(url)) return;
@@ -378,6 +396,8 @@ export class Resolver {
       const best = pickBest(candidates);
       if (best) {
         const url = best.probe.finalUrl || best.url;
+        // An Anvato player whose stream came from Anvato: next time, ask Anvato directly.
+        if (!login && anvatoSeen.length && isAnvatoHost(url)) await this.learnAnvato(station, anvatoSeen, url);
         return await finish({
           url,
           type: best.type || (best.probe.dash ? 'dash' : 'hls'),
@@ -415,6 +435,49 @@ export class Resolver {
     } finally {
       await context.close().catch(() => {});
     }
+  }
+
+  // Keeps the Anvato requests the page made whose answer is the stream the page resolve picked
+  // (the same manifest path), so a clip or another channel's player on the page is never kept.
+  async learnAnvato(station, seen, streamUrl) {
+    const path = u => { try { return new URL(u).pathname; } catch { return null; } };
+    const want = path(streamUrl);
+    const keep = [];
+    for (const source of seen) {
+      const manifests = await fetchAnvato(source, { userAgent: CHROME_UA, referer: station.url, fetchImpl: this.fetchImpl }).catch(() => []);
+      if (manifests.some(m => path(m) === want)) keep.push(source);
+    }
+    if (keep.length) await this.anvato.remember(station.url, keep).catch(() => {});
+  }
+
+  // The Anvato fast path: asks Anvato's video API for the stream with the video ID and access
+  // key a page resolve saw, and checks it's live. Null (and the page is opened as usual) when
+  // nothing was learned for the station or Anvato's answer doesn't play; a source that fails is
+  // forgotten, and the page resolve learns it again if the player still uses it.
+  async resolveAnvato(station) {
+    if (!this.anvato) return null;
+    const started = Date.now();
+    const headers = { 'user-agent': CHROME_UA, referer: station.url };
+    for (const source of this.anvato.get(station.url)) {
+      let problem;
+      try {
+        for (const manifest of await fetchAnvato(source, { userAgent: headers['user-agent'], referer: station.url, fetchImpl: this.fetchImpl })) {
+          const probe = await probeManifest(manifest, headers, { maxHeight: this.maxHeight, fetchImpl: this.fetchImpl });
+          if (probe.ok && probe.live && !probe.dash) {
+            const url = probe.finalUrl || manifest;
+            await this.anvato.remember(station.url, [source]);
+            return { url, type: 'hls', headers, via: 'anvato', expiresAt: expiryFromUrl(url, Date.now()), resolvedAt: Date.now(), tookMs: Date.now() - started };
+          }
+          problem = probe.ok ? 'not live' : probe.error;
+        }
+        problem ||= 'no stream in the answer';
+      } catch (e) {
+        problem = e.name === 'TimeoutError' || e.name === 'AbortError' ? 'timeout' : String(e.message || e);
+      }
+      this.log.info?.(`[${station.id}] Anvato fast path failed (${problem}); opening the page`);
+      await this.anvato.forget(station.url, source).catch(() => {});
+    }
+    return null;
   }
 
   // A station with a manual stream URL: use it directly when it's a live manifest, otherwise let

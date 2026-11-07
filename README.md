@@ -25,6 +25,7 @@ It works with Jellyfin 12.2 and needs a small companion Docker container, the *s
 - 🏈 **Local sports first.** Your teams' games, from ESPN's schedules, put the station airing them at the top, and a *Local Sports* channel always plays the game.
 - 📍 **Coverage area.** Pick how far away stations can be, in miles, from your location or the market's center.
 - 🔄 **Streams that keep working.** Station stream URLs expire within minutes or hours. The sidecar finds fresh ones behind stable channel URLs, with no interruption.
+- ⚡ **Fast for Anvato stations.** Stations whose player is Anvato (Nexstar's FOX and CW stations, among others) get a fresh stream in under half a second, with no browser, after the first visit to their page.
 - 🧪 **Test now.** See exactly what the sidecar finds on a station's page, or why it can't play it.
 - 🛡️ **Private by design.** No telemetry and no accounts; everything runs on your server. See [PRIVACY.md](PRIVACY.md).
 
@@ -32,38 +33,22 @@ It works with Jellyfin 12.2 and needs a small companion Docker container, the *s
 
 Many local TV stations stream live for free on their websites, but their players need a real browser, and the stream URLs carry tokens that expire. The sidecar handles both:
 
-```mermaid
-flowchart TB
-    C["Jellyfin apps: TV, phone, web"]
-    subgraph server["Your server"]
-        J["Jellyfin + Local Broadcast plugin"]
-        S["Sidecar (Docker): headless Chrome + media-scraper.js"]
-    end
-    W["Station websites"]
-    E["ESPN schedules"]
-    J -- "Live TV" --> C
-    J -- "stations, teams" --> S
-    S -- "playlist, guide, streams" --> J
-    S -- "finds each live stream" --> W
-    S -- "team schedules" --> E
-```
+<p align="center">
+  <img src="docs/diagrams/architecture.svg" alt="The plugin's settings page saves stations and teams; SyncService pushes them to the sidecar and LiveTvRegistrar adds the sidecar to Jellyfin Live TV as an M3U tuner and XMLTV guide. Live TV asks the sidecar's app.js for the playlist, guide and streams; resolver.js opens each station's page in headless Chrome with media-scraper.js loaded first, and app.js proxies the HLS segments. For a station whose player is Anvato, anvato.js keeps the video ID from that first visit and afterwards asks Anvato's video API for the stream directly, with no browser. sports.js reads team schedules from ESPN.">
+</p>
 
 | Part | What it does |
 | --- | --- |
 | **Jellyfin plugin** (`Jellyfin.Plugin.LocalBroadcast/`) | A settings page for stations, local teams and the coverage area. It sends them to the sidecar and adds the sidecar to Live TV as an M3U tuner with an XMLTV guide, so there's nothing to set up under Live TV yourself. |
-| **Sidecar** (`sidecar/`, Docker image) | Opens each station's live page in headless Chrome with `media-scraper.js` loaded first, and finds the live HLS stream. Serves it to Jellyfin through a small proxy that re-resolves expired tokens behind stable URLs. Also serves the M3U playlist and the XMLTV guide. |
+| **Sidecar** (`sidecar/`, Docker image) | Opens each station's live page in headless Chrome with `media-scraper.js` loaded first, and finds the live HLS stream. For stations whose player is Anvato, it asks Anvato for the stream directly after the first visit ([Anvato fast path](#anvato-fast-path)). Serves it to Jellyfin through a small proxy that re-resolves expired tokens behind stable URLs. Also serves the M3U playlist and the XMLTV guide. |
 
 ### Local sports first
 
 Give the plugin your local teams (each bundled market comes with its area's teams). The sidecar reads each team's schedule and TV listings from ESPN's public API. It matches over-the-air broadcasts to your stations by network (a CBS game is on the CBS affiliate), call sign, name, or the station's *sports aliases*.
 
-```mermaid
-flowchart LR
-    A["ESPN: your team<br/>plays at 7:00 on NBC"] --> B["Sidecar matches NBC<br/>to your NBC station"]
-    B --> C["6:45: stream fetched early,<br/>station moves to the top"]
-    C --> D["Local Sports channel<br/>plays that station"]
-    D --> E["Game ends:<br/>back to normal"]
-```
+<p align="center">
+  <img src="docs/diagrams/local-sports.svg" alt="Every 30 minutes SyncService asks the sidecar for the week's games, which sports.js reads from ESPN and matches to your stations; when the games changed, Jellyfin refreshes the guide and shows each game under Sports. Every minute the sidecar resolves the stream of any station airing a game. Tuning in to Local Sports plays that station's stream, or an off-air card between games.">
+</p>
 
 While a game is on (from 15 minutes before the start):
 
@@ -141,6 +126,7 @@ Whether a station works depends on how its website streams:
 | The station's website... | Result |
 | --- | --- |
 | plays an HLS stream in its own web player | ✅ Works. Most stations. |
+| plays an Anvato (Lura) stream, as Nexstar's stations do | ✅ Works, and after the first page visit [without the browser](#anvato-fast-path). |
 | streams through Google's ad-insertion service (DAI), common on Gray Television sites | ✅ Works, also behind DNS ad blockers such as AdGuard or Pi-hole: the sidecar uses `dai.google.com`, which they don't block. |
 | embeds YouTube or another site yt-dlp supports | ✅ Works through yt-dlp. |
 | streams only during newscasts | ⚠️ Plays during newscasts; at other times the channel shows a "Nothing is streaming right now" screen. |
@@ -151,6 +137,12 @@ Whether a station works depends on how its website streams:
 | plays another station's stream | Left off, so the same channel doesn't appear twice. |
 
 Each market file keeps the stations that don't work, turned off, with a note saying why; the settings page shows the note. To turn one on, paste a **stream URL** you're allowed to use into its settings: a `.m3u8` that doesn't expire, or a page yt-dlp supports, such as the station's YouTube live stream.
+
+### Anvato fast path
+
+Many stations' players are Anvato's (Lura's): Nexstar's FOX and CW stations, such as KDVR, KWGN and KXRM. The player asks Anvato's video API for the live stream, with the video's ID and the player's public access key in the URL. When the sidecar opens such a station's page and its stream comes from Anvato, it keeps that ID and key (in `anvato.json` in the data volume). From then on it asks Anvato for the stream directly, over plain HTTP, sending only the ID and key: none of the player's ad parameters, cookies or device IDs. That takes about 0.4 s instead of 6 to 9 s with the browser.
+
+If Anvato's answer doesn't play (the station moved to another player, say), the sidecar forgets the ID and key and opens the page as before, which learns them again if the player still uses Anvato. Stations with a [sign-in](#station-sign-ins) always use the page. `ANVATO_FAST_PATH=false` turns the fast path off.
 
 ### Bot checks
 
@@ -186,6 +178,7 @@ Missing your area? [CONTRIBUTING.md](CONTRIBUTING.md) shows the format and how t
 | `RESOLVE_TTL_MINUTES` | `30` | How long a found stream is reused (shorter when its token expires sooner). |
 | `MAX_CONCURRENT_RESOLVES` | `2` | Browser pages at once; local-sports stations jump the queue, and the background warm-up ("Keep streams ready") never takes the last one. |
 | `REMEMBER_VISITS` | `true` | Keep the cookies of stations without a sign-in between visits, which makes [bot checks](#bot-checks) less likely. `false` makes each of their visits a first one, and deletes the visits kept. |
+| `ANVATO_FAST_PATH` | `true` | Ask Anvato's video API directly for stations whose player is Anvato, instead of opening their page every time. See [Anvato fast path](#anvato-fast-path). |
 | `BROWSER_CHANNEL` | `chrome` | Google Chrome; empty uses the bundled Chromium (what ARM uses). Both play H.264/AAC. |
 | `PUBLIC_URL` | from the request | Base URL written into the M3U. |
 
@@ -214,6 +207,8 @@ docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
 The sidecar tests run `media-scraper.js` and the resolver in a real browser (`sidecar/test/scraper.test.js`, the sign-in tests, and the resolver test in `visits.test.js`). `scraper.test.js` and `visits.test.js` skip theirs when Playwright has no browser installed.
 
 CI (`.github/workflows/ci.yml`) runs both test suites on every push and pull request, and publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar` (`:edge` from main). On a `vX.Y.Z` tag that matches `version` in `build.yaml`, it publishes the image (`:X.Y.Z`, `:latest`), a GitHub release with the plugin zip, and the plugin catalog on GitHub Pages. `scripts/publish-repo.sh <dir>` publishes to a self-hosted plugin repository folder instead.
+
+The diagrams in this README are drawn with [archgram](https://www.npmjs.com/package/archgram) from the specs in `docs/diagrams/`. Each box and line in a spec names the code behind it, so after changing that code, run `npx archgram check docs/diagrams/<name>.archgram.yaml` and then `npx archgram build` on the same file to redraw it.
 
 CodeQL (`.github/workflows/codeql.yml`) scans `media-scraper.js`, the sidecar, the C# plugin and the workflows with the `security-extended` queries on every push to main, every pull request and weekly. Findings show in the repository's Security tab.
 
