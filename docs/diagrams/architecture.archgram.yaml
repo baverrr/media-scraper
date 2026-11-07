@@ -1,0 +1,47 @@
+archgram: 1
+title: Local Broadcast for Jellyfin
+description: >-
+  The plugin's settings page saves stations and teams; the sync service
+  pushes them to the sidecar and registers the sidecar with Jellyfin Live TV
+  as an M3U tuner and XMLTV guide. When Live TV asks for a channel, the
+  sidecar's server has the resolver open the station's page in headless
+  Chrome with media-scraper.js loaded first, finds the live stream, and
+  proxies it back. For a station whose player is Anvato, anvato.js keeps the
+  player's video ID from that first visit and afterwards asks Anvato's video
+  API for the stream directly, with no browser. For local sports the sidecar
+  reads team schedules from ESPN.
+direction: down
+nodes:
+  - { id: settings, kind: browser, label: Settings page, note: "stations, teams, coverage", frame: plugin, source: ../../Jellyfin.Plugin.LocalBroadcast/Configuration/configPage.html }
+  - { id: sync, kind: service, label: SyncService, note: plugin API + sync, tech: dotnet, frame: plugin, source: [../../Jellyfin.Plugin.LocalBroadcast/SyncService.cs, ../../Jellyfin.Plugin.LocalBroadcast/Api/LocalBroadcastController.cs, ../../Jellyfin.Plugin.LocalBroadcast/Sidecar/SidecarClient.cs] }
+  - { id: registrar, kind: service, label: LiveTvRegistrar, note: adds tuner + guide, tech: dotnet, frame: plugin, source: ../../Jellyfin.Plugin.LocalBroadcast/LiveTv/LiveTvRegistrar.cs }
+  - { id: livetv, kind: service, label: Jellyfin Live TV, note: "plays to TV, phone, web", tech: jellyfin, variant: external }
+  - { id: app, kind: service, label: app.js, note: "playlist, guide, HLS proxy", tech: nodedotjs, frame: sidecar, source: ../../sidecar/src/app.js }
+  - { id: resolver, kind: service, label: resolver.js, note: headless Chrome, tech: googlechrome, frame: sidecar, source: ../../sidecar/src/resolver.js }
+  - { id: scraper, kind: script, label: media-scraper.js, note: finds the live stream, frame: sidecar, source: ../../media-scraper.js }
+  - { id: anvato, kind: service, label: anvato.js, note: "fast path, no browser", frame: sidecar, source: ../../sidecar/src/anvato.js }
+  - { id: anvato-api, kind: service, label: Anvato video API, note: "*.lura.live", variant: external, source: ../../sidecar/src/anvato.js }
+  - { id: sports, kind: service, label: sports.js, note: game schedule, frame: sidecar, source: ../../sidecar/src/sports.js }
+  - { id: stations, kind: service, label: Station websites, note: pages + HLS streams, variant: external }
+  - { id: espn, kind: service, label: ESPN API, note: team schedules, variant: external }
+frames:
+  - { id: plugin, label: Jellyfin plugin }
+  - { id: sidecar, label: Sidecar (Docker) }
+edges:
+  - { from: settings, to: sync, label: save · sync, source: "../../Jellyfin.Plugin.LocalBroadcast/Configuration/configPage.html#ApiClient.getUrl('LocalBroadcast/' + path)" }
+  - { from: sync, to: app, label: PUT stations · teams, source: "../../Jellyfin.Plugin.LocalBroadcast/SyncService.cs#_sidecar.PushStationsAsync(" }
+  - { from: sync, to: registrar, label: ensure, source: "../../Jellyfin.Plugin.LocalBroadcast/SyncService.cs#_registrar.EnsureAsync(config)" }
+  - { from: registrar, to: livetv, label: M3U tuner · XMLTV, source: "../../Jellyfin.Plugin.LocalBroadcast/LiveTv/LiveTvRegistrar.cs#_tunerHosts.SaveTunerHost(" }
+  - { from: livetv, to: app, label: playlist · guide · streams, source: "../../sidecar/src/app.js#p === '/playlist.m3u'" }
+  - { from: app, to: resolver, label: resolve, source: "../../sidecar/src/app.js#resolver.resolve(station, loginFor(station)" }
+  - { from: resolver, to: anvato, label: learned video, source: "../../sidecar/src/resolver.js#for (const manifest of await fetchAnvato(" }
+  - { from: anvato, to: anvato-api, label: video ID + key, source: "../../sidecar/src/anvato.js#fetchImpl(anvatoRequestUrl(source)" }
+  - { from: resolver, to: scraper, label: init script, source: "../../sidecar/src/resolver.js#context.addInitScript({ content: this.scraperSource })" }
+  - { from: resolver, to: stations, label: open live page, source: "../../sidecar/src/resolver.js#page.goto(station.url" }
+  - { from: app, to: stations, label: HLS segments, style: dashed, source: "../../sidecar/src/app.js#await fetchImpl(u, {" }
+  - { from: app, to: sports, label: games on air, source: "../../sidecar/src/app.js#sports.onAirNow(store.enabled())" }
+  - { from: sports, to: espn, label: team schedule, source: "../../sidecar/src/sports.js#https://site.api.espn.com/apis/site/v2/sports/" }
+flows:
+  - { name: setup, steps: [settings, sync, [app, registrar]] }
+  - { name: a channel's first visit, steps: [livetv, app, resolver, [scraper, stations]] }
+  - { name: an Anvato channel after that, steps: [livetv, app, resolver, anvato, anvato-api] }
