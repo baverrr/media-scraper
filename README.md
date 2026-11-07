@@ -24,8 +24,28 @@ A Jellyfin plugin that adds your local TV stations to Live TV, using the free li
 - **Local sports first.** Your teams' games, from ESPN's schedules, put the station airing them at the top, and the *Local Sports* channel plays the game.
 - **Coverage area.** Keep only stations within a set number of miles of you or the market's center.
 - **Streams that keep working.** Station stream links expire within minutes or hours. The sidecar finds fresh ones behind links that don't change.
+- **Fast for Anvato stations.** Stations whose player is Anvato (Nexstar's FOX and CW stations, among others) get a fresh stream in under half a second, without opening a browser, after the first visit to their page.
 - **Test now.** See what the sidecar finds on a station's page, or why it can't play it.
 - **Stays on your server.** No telemetry and no accounts. See [PRIVACY.md](PRIVACY.md).
+
+<table>
+  <tr>
+    <td><img src="docs/images/livetv-channels.png" alt="Jellyfin Live TV showing Local Sports and the Denver stations as channels"></td>
+    <td><img src="docs/images/livetv-guide.png" alt="Jellyfin's guide with each station's live stream and Local Sports' no-game card"></td>
+  </tr>
+  <tr>
+    <td align="center">Stations as Live TV channels</td>
+    <td align="center">The guide</td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/settings-sidecar.png" alt="The plugin settings: sidecar URL, API key, and keeping streams ready"></td>
+    <td><img src="docs/images/settings-stations.png" alt="The station list, each with its status: stream ready, disabled with a reason, or the last error"></td>
+  </tr>
+  <tr>
+    <td align="center">Connecting the sidecar</td>
+    <td align="center">Stations and why each one plays or not</td>
+  </tr>
+</table>
 
 The plugin needs a small companion Docker container, the *sidecar*. It opens each station's live page in headless Chrome and finds the stream with [`media-scraper.js`](docs/media-scraper.md), a browser script in this repo that also works on its own.
 
@@ -100,11 +120,13 @@ Between games, *Local Sports* plays a "No local game on the air" card. Stations'
 | The station's website... | Result |
 | --- | --- |
 | plays an HLS stream in its own web player | Works. Most stations. |
+| plays an Anvato (Lura) stream, as Nexstar's stations do | Works, and after the first visit without opening a browser |
 | streams through Google's ad-insertion service (DAI) | Works, also behind DNS ad blockers such as AdGuard or Pi-hole |
 | embeds YouTube or another site yt-dlp supports | Works through yt-dlp |
 | streams only during newscasts | Plays during newscasts, shows "Nothing is streaming right now" otherwise |
 | streams only to signed-in (free) accounts | Works with a sign-in saved for the station, when the sign-in form is a plain one |
-| uses DRM, streams only in an app, or shows a bot check | Doesn't work |
+| uses DRM or streams only in an app | Doesn't work |
+| shows a bot check | Doesn't work while the check is up. The sidecar never solves one, but makes them rarer: it comes back as the same visitor, and leaves a site alone for a while (15 minutes, doubling up to 6 hours) after one |
 | plays another station's stream | Left off, so the same channel doesn't appear twice |
 
 Stations that don't work stay in the market file, turned off, with a note saying why. To turn one on, paste a stream URL you're allowed to use: a `.m3u8` that doesn't expire, or a page yt-dlp supports.
@@ -131,7 +153,7 @@ Stations that don't work stay in the market file, turned off, with a note saying
 <details>
 <summary><b>For developers</b></summary>
 
-- Sidecar settings: `API_KEY`, `MARKET`, `TZ`, `MAX_HEIGHT` (default `1080`), `LOGIN_KEY`, `RESOLVE_TTL_MINUTES` (default `30`), `MAX_CONCURRENT_RESOLVES` (default `2`), `BROWSER_CHANNEL` (default `chrome`, empty for the bundled Chromium) and `PUBLIC_URL`. See [`sidecar/compose.yaml`](sidecar/compose.yaml).
+- Sidecar settings: `API_KEY`, `MARKET`, `TZ`, `MAX_HEIGHT` (default `1080`), `LOGIN_KEY`, `RESOLVE_TTL_MINUTES` (default `30`), `MAX_CONCURRENT_RESOLVES` (default `2`), `BROWSER_CHANNEL` (default `chrome`, empty for the bundled Chromium), `REMEMBER_VISITS` (default `true`: keep each station's cookies between visits), `ANVATO_FAST_PATH` (default `true`) and `PUBLIC_URL`. See [`sidecar/compose.yaml`](sidecar/compose.yaml).
 - Sidecar API: `GET /playlist.m3u`, `/guide.xml`, `/stream/<id>.m3u8`, `/api/status`, `/api/sports`, `/api/stations`. With the `X-Api-Key` header: `PUT /api/stations`, `PUT /api/sports`, `POST /api/stations/<id>/test`. Proxied segment URLs are HMAC-signed.
 - Run the tests:
 
@@ -141,6 +163,7 @@ Stations that don't work stay in the market file, turned off, with a note saying
   docker build -f sidecar/Dockerfile -t local-broadcast-sidecar .
   ```
 
+- How the parts fit together: [architecture diagram](docs/diagrams/architecture.svg), drawn with archgram from [`docs/diagrams/`](docs/diagrams/).
 - Layout: `Jellyfin.Plugin.LocalBroadcast/` (the plugin), `sidecar/` (the Docker sidecar), `media-scraper.js` ([its docs](docs/media-scraper.md)).
 - CI runs both test suites and publishes the sidecar image to `ghcr.io/<owner>/local-broadcast-sidecar`. A `vX.Y.Z` tag matching `build.yaml` also publishes a release and the plugin catalog. `scripts/publish-repo.sh <dir>` publishes to your own plugin repository folder instead. CodeQL scans the code weekly.
 - Security: see [SECURITY.md](SECURITY.md).
