@@ -8,3 +8,6 @@ dist/
 release/
 # Backups of the settings file (they hold the same keys)
 sidecar/.env.bak*
+# Local tool state (Claude Code, Serena)
+.claude/
+.serena/
