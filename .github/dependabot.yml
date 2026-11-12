@@ -3,5 +3,7 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
+    cooldown:
+      default-days: 7 # let a new release settle before an update PR
     directory: /
     schedule: { interval: weekly }
